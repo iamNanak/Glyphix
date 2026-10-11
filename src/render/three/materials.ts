@@ -73,6 +73,7 @@ export function createImageMaterial(map: THREE.Texture) {
     size: uniform(new THREE.Vector2(1, 1)),
     radius: uniform(0),
     opacity: uniform(1),
+    crop: uniform(new THREE.Vector4(0, 0, 1, 1)),
     map: texture(map),
   };
   const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthTest: false, depthWrite: false });
@@ -80,7 +81,8 @@ export function createImageMaterial(map: THREE.Texture) {
     const p = uv().sub(0.5).mul(u.size);
     const d = sdRoundRect(p, u.size.mul(0.5), u.radius);
     // Textures are uploaded with flipY=false on both backends: v=0 is the first (top) row.
-    const c = u.map.sample(vec2(uv().x, float(1).sub(uv().y)));
+    const st = vec2(uv().x, float(1).sub(uv().y));
+    const c = u.map.sample(u.crop.xy.add(st.mul(u.crop.zw)));
     return vec4(c.rgb, c.a.mul(aaCoverage(d)).mul(u.opacity));
   })();
   return { mat, u };

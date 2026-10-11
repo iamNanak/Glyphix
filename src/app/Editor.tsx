@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Download, Film, Pause, Play, Redo2, Undo2, X } from 'lucide-react';
+import { Activity, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Undo2, X } from 'lucide-react';
 import { useEditor } from './store';
 import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
@@ -7,7 +7,9 @@ import { Inspector } from './Inspector';
 import { Button, IconButton } from './ui';
 import { downloadBlob, exportPng, exportVideo } from '@/export/exporter';
 import { importImage } from '@/assets/assetStore';
-import { createImageLayer, fitSize, makeInsert } from '@/doc';
+import { createImageLayer, fitSize, makeInsert, offsetProp } from '@/doc';
+import { Overlay, startTextEdit } from '@/editor/Overlay';
+import { useView } from '@/editor/viewStore';
 import { layerIndex } from './store';
 
 export function Editor() {
@@ -15,6 +17,10 @@ export function Editor() {
   const time = useEditor((s) => s.time);
   const forceWebGL = useEditor((s) => s.forceWebGL);
   const [backend, setBackend] = useState<string>('…');
+  const view = useView((s) => s.view);
+  const setHost = useView((s) => s.setHost);
+  const setComp = useView((s) => s.setComp);
+  useEffect(() => setComp(doc.comp.width, doc.comp.height), [doc.comp.width, doc.comp.height, setComp]);
   const [error, setError] = useState<string | null>(null);
   usePlaybackClock();
   useShortcuts();
@@ -26,13 +32,24 @@ export function Editor() {
       <div className="grid min-h-0 grid-cols-[220px_1fr_288px]">
         <LayersPanel />
         <main className="relative min-h-0 min-w-0 bg-[radial-gradient(circle_at_center,#16161f_0,#0b0b0f_70%)]">
-          <Viewport doc={doc} time={time} forceWebGL={forceWebGL} onStats={(s) => setBackend(s.backend)} onError={setError} />
+          <Viewport
+            doc={doc}
+            time={time}
+            forceWebGL={forceWebGL}
+            view={view}
+            onHostResize={setHost}
+            onStats={(s) => setBackend(s.backend)}
+            onError={setError}
+          >
+            <Overlay />
+          </Viewport>
+          <ZoomControls />
           {error && (
             <div role="alert" className="absolute top-3 left-1/2 -translate-x-1/2 rounded-md bg-red-500/15 px-3 py-2 text-xs text-red-200 ring-1 ring-red-500/40">
               {error}
             </div>
           )}
-          <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-xs text-muted">Paste or drop a screenshot to replace the image</p>
+          <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-muted">Paste or drop an image · double-click text to edit, image to crop</p>
         </main>
         <Inspector />
       </div>
@@ -184,25 +201,69 @@ function useShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const typing = target.closest('input, textarea, select, [contenteditable]') && !(target instanceof HTMLInputElement && target.type === 'range');
+      if (typing) return;
       const s = useEditor.getState();
+      const v = useView.getState();
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === 'z' && !typing) {
-        e.preventDefault();
-        if (e.shiftKey) s.redo();
-        else s.undo();
-      } else if (mod && e.key.toLowerCase() === 'y' && !typing) {
-        e.preventDefault();
-        s.redo();
-      } else if (e.key === ' ' && !typing) {
-        e.preventDefault();
-        s.setPlaying(!s.playing);
-      } else if (e.key === 'Home' && !typing) {
-        s.setTime(0);
+      const key = e.key.toLowerCase();
+      const sel = s.doc.comp.layers.find((l) => l.id === s.selectedId);
+      const handled = () => e.preventDefault();
+
+      if (mod && key === 'z') return handled(), e.shiftKey ? s.redo() : s.undo();
+      if (mod && key === 'y') return handled(), s.redo();
+      if (mod && key === '0') return handled(), v.fit();
+      if (mod && key === '1') return handled(), v.zoomTo(1);
+      if (mod && (key === '=' || key === '+')) return handled(), v.zoomAt(1.25, v.host.width / 2, v.host.height / 2);
+      if (mod && key === '-') return handled(), v.zoomAt(0.8, v.host.width / 2, v.host.height / 2);
+      if (e.key === ' ') return handled(), s.setPlaying(!s.playing);
+      if (e.key === 'Home') return s.setTime(0);
+      if (e.key === 'Escape') return s.cropId ? s.setCrop(null) : s.select(null);
+      if (!sel || sel.locked) return;
+      if (mod && key === 'd') return handled(), s.duplicateLayer(sel.id);
+      if (mod && e.key === ']') return handled(), s.moveLayer(sel.id, e.shiftKey ? 999 : 1);
+      if (mod && e.key === '[') return handled(), s.moveLayer(sel.id, e.shiftKey ? -999 : -1);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && sel.type !== 'background') return handled(), s.removeLayer(sel.id);
+      if (e.key === 'Enter' && sel.type === 'text') return handled(), startTextEdit(sel);
+      const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+      const dir = arrows[e.key];
+      if (dir && sel.type !== 'background') {
+        handled();
+        const step = e.shiftKey ? 10 : 1;
+        const i = layerIndex(s.doc, sel.id);
+        s.set(
+          'Nudge',
+          [
+            { path: ['comp', 'layers', i, 'transform', 'x'], value: offsetProp(sel.transform.x, dir[0] * step) },
+            { path: ['comp', 'layers', i, 'transform', 'y'], value: offsetProp(sel.transform.y, dir[1] * step) },
+          ],
+          `nudge:${sel.id}`,
+        );
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+}
+
+function ZoomControls() {
+  const zoom = useView((s) => s.view.zoom);
+  const { fit, zoomAt, host } = useView.getState();
+  return (
+    <div className="absolute right-3 bottom-2 flex items-center gap-1 rounded-md bg-panel/90 px-1 py-0.5 ring-1 ring-line">
+      <IconButton label="Zoom out (Ctrl+-)" onClick={() => zoomAt(0.8, host.width / 2, host.height / 2)}>
+        <Minus size={14} />
+      </IconButton>
+      <button type="button" className="w-12 text-center font-mono text-xs text-zinc-300 tabular-nums" title="Fit (Ctrl+0)" onClick={fit}>
+        {Math.round(zoom * 100)}%
+      </button>
+      <IconButton label="Zoom in (Ctrl+=)" onClick={() => zoomAt(1.25, host.width / 2, host.height / 2)}>
+        <Plus size={14} />
+      </IconButton>
+      <IconButton label="Fit to screen (Ctrl+0)" onClick={fit}>
+        <Maximize size={14} />
+      </IconButton>
+    </div>
+  );
 }
 
 function usePasteImage(onError: (msg: string | null) => void) {

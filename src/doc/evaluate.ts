@@ -2,6 +2,7 @@ import { ease } from './easing';
 import { seededPermutation } from './random';
 import type {
   Color,
+  CropRect,
   Doc,
   Easing,
   GlyphAnimator,
@@ -35,6 +36,7 @@ export interface ImageItem extends ResolvedTransform {
   kind: 'image';
   id: string;
   assetId: string;
+  crop: CropRect;
   width: number;
   height: number;
   opacity: number;
@@ -111,6 +113,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
           kind: 'image',
           id: layer.id,
           assetId: layer.assetId,
+          crop: layer.crop,
           width: layer.width,
           height: layer.height,
           opacity,

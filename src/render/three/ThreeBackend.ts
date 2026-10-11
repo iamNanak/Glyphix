@@ -11,7 +11,7 @@ import {
 } from '@/doc';
 import { assetStore, pickLevel } from '@/assets/assetStore';
 import { fontLibrary, type LaidOutGlyph } from '@/text/fontLibrary';
-import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats } from '../backend';
+import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
 import {
   createGlyphMaterial,
   createGradientMaterial,
@@ -156,7 +156,7 @@ class ImageNode implements LayerNode {
   update(raw: RenderItem, ctx: FrameCtx) {
     const item = raw as ImageItem;
     applyTransform(this.root, item);
-    const tex = ctx.textures.get(item.assetId, item.width * item.scale * ctx.pxPerUnit);
+    const tex = ctx.textures.get(item.assetId, (item.width / item.crop.w) * item.scale * ctx.pxPerUnit);
     if (tex && !this.image) {
       this.image = createImageMaterial(tex);
       this.imageMesh = new THREE.Mesh(unitPlane, this.image.mat);
@@ -169,6 +169,7 @@ class ImageNode implements LayerNode {
       this.imageMesh.scale.set(item.width, item.height, 1);
       this.image.u.size.value.set(item.width, item.height);
       this.image.u.radius.value = item.radius;
+      this.image.u.crop.value.set(item.crop.x, item.crop.y, item.crop.w, item.crop.h);
       this.image.u.opacity.value = item.opacity;
       this.imageMesh.visible = !!tex;
     }
@@ -310,6 +311,8 @@ export class ThreeBackend implements RenderBackend {
   private nodes = new Map<string, LayerNode>();
   private textures: TextureCache;
   private bufferSize = new THREE.Vector2();
+  private cssSize = { width: 1, height: 1 };
+  private view: View | null = null;
   private atlas: THREE.DataTexture;
   private atlasVersion = -1;
   private lastStats = { glyphs: 0 };
@@ -353,13 +356,27 @@ export class ThreeBackend implements RenderBackend {
   setSize(width: number, height: number, pixelRatio: number) {
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
+    this.cssSize = { width, height };
+  }
+
+  setView(view: View | null) {
+    this.view = view;
   }
 
   render(list: RenderList) {
-    if (this.camera.right !== list.width || this.camera.bottom !== -list.height) {
-      this.camera.right = list.width;
-      this.camera.bottom = -list.height;
-      this.camera.updateProjectionMatrix();
+    // Visible comp rect. World space is comp space with y flipped.
+    const v = this.view;
+    const x0 = v ? -v.offsetX / v.zoom : 0;
+    const y0 = v ? -v.offsetY / v.zoom : 0;
+    const x1 = v ? x0 + this.cssSize.width / v.zoom : list.width;
+    const y1 = v ? y0 + this.cssSize.height / v.zoom : list.height;
+    const cam = this.camera;
+    if (cam.left !== x0 || cam.right !== x1 || cam.top !== -y0 || cam.bottom !== -y1) {
+      cam.left = x0;
+      cam.right = x1;
+      cam.top = -y0;
+      cam.bottom = -y1;
+      cam.updateProjectionMatrix();
     }
     if (fontLibrary.atlasVersion !== this.atlasVersion) {
       this.atlas.needsUpdate = true;
@@ -373,7 +390,7 @@ export class ThreeBackend implements RenderBackend {
       height: list.height,
       textures: this.textures,
       atlas: this.atlas,
-      pxPerUnit: this.bufferSize.x / list.width,
+      pxPerUnit: this.bufferSize.x / (x1 - x0),
       stats: { glyphs: 0 },
     };
     const seen = new Set<string>();

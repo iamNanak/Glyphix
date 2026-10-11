@@ -1,5 +1,5 @@
 import { Easings } from './easing';
-import { SCHEMA_VERSION, type Doc } from './types';
+import { FULL_CROP, SCHEMA_VERSION, type Doc } from './types';
 
 export const DEMO_SCREENSHOT_ASSET = 'demo-screenshot';
 
@@ -36,6 +36,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           visible: true,
           locked: false,
           assetId: DEMO_SCREENSHOT_ASSET,
+          crop: FULL_CROP,
           width: 1280,
           height: 760,
           radius: 18,

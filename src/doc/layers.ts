@@ -1,4 +1,4 @@
-import type { Comp, ImageLayer } from './types';
+import { FULL_CROP, type Comp, type ImageLayer } from './types';
 
 export function newLayerId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -19,6 +19,7 @@ export function createImageLayer(comp: Comp, assetId: string, srcW: number, srcH
     visible: true,
     locked: false,
     assetId,
+    crop: FULL_CROP,
     width,
     height,
     radius: 16,

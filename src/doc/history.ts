@@ -65,10 +65,36 @@ export function makeInsert(arrayPath: Path, index: number, value: unknown, label
 
 const arrayPathSplice = (p: Path, i: number): Path => [...p, `__insert:${i}`];
 
+/** Remove array[index] (inverse re-inserts `value`, which must be the current element). */
+export function makeRemove(arrayPath: Path, index: number, value: unknown, label: string): HistoryEntry {
+  return {
+    label,
+    forward: [{ path: [...arrayPath, index], value: undefined }],
+    inverse: [{ path: arrayPathSplice(arrayPath, index), value: { __insert: value } }],
+  };
+}
+
+/** Move array[from] to index `to` (index in the array after removal). */
+export function makeMove(arrayPath: Path, from: number, to: number, value: unknown, label: string): HistoryEntry {
+  return {
+    label,
+    forward: [
+      { path: [...arrayPath, from], value: undefined },
+      { path: arrayPathSplice(arrayPath, to), value: { __insert: value } },
+    ],
+    inverse: [
+      { path: [...arrayPath, to], value: undefined },
+      { path: arrayPathSplice(arrayPath, from), value: { __insert: value } },
+    ],
+  };
+}
+
 export class History<T> {
   private past: HistoryEntry[] = [];
   private future: HistoryEntry[] = [];
   private lastCommitAt = 0;
+  /** While a gesture (drag, text edit) is open, every commit merges into one undo step. */
+  private gesture: { index: number } | null = null;
 
   constructor(
     private doc: T,
@@ -86,8 +112,30 @@ export class History<T> {
     return this.future.length > 0;
   }
 
+  beginGesture(): void {
+    this.gesture = { index: -1 };
+  }
+
+  endGesture(): void {
+    this.gesture = null;
+  }
+
   commit(entry: HistoryEntry, now = Date.now()): T {
     this.doc = applyEntry(this.doc, entry.forward);
+    if (this.gesture) {
+      if (this.gesture.index >= 0 && this.gesture.index === this.past.length - 1) {
+        const open = this.past[this.gesture.index]!;
+        // Forward keeps the latest value per path; inverse keeps the value from before the gesture.
+        this.past[this.gesture.index] = { ...open, forward: mergeForward(open.forward, entry.forward), inverse: mergeInverse(open.inverse, entry.inverse) };
+      } else {
+        this.past.push(entry);
+        if (this.past.length > this.limit) this.past.shift();
+        this.gesture.index = this.past.length - 1;
+      }
+      this.future = [];
+      this.lastCommitAt = now;
+      return this.doc;
+    }
     const prev = this.past[this.past.length - 1];
     const coalesce =
       entry.coalesceKey !== undefined &&
@@ -154,4 +202,10 @@ function mergeForward(prev: Patch[], next: Patch[]): Patch[] {
   const map = new Map(prev.map((p) => [key(p), p]));
   for (const p of next) map.set(key(p), p);
   return [...map.values()];
+}
+
+function mergeInverse(older: Patch[], newer: Patch[]): Patch[] {
+  const key = (p: Patch) => JSON.stringify(p.path);
+  const known = new Set(older.map(key));
+  return [...newer.filter((p) => !known.has(key(p))), ...older];
 }

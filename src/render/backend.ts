@@ -10,11 +10,20 @@ export interface RenderStats {
 }
 
 /** Renderer-agnostic interface. Everything a backend needs is in the RenderList + asset/font stores. */
+/** Where the comp sits on the canvas: comp origin at (offsetX, offsetY) CSS px, `zoom` CSS px per comp px. */
+export interface View {
+  offsetX: number;
+  offsetY: number;
+  zoom: number;
+}
+
 export interface RenderBackend {
   readonly kind: BackendKind;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   /** Drawing-buffer size = width×height×pixelRatio. Comp space is always mapped to fill it. */
   setSize(width: number, height: number, pixelRatio: number): void;
+  /** null = the comp exactly fills the canvas (export). */
+  setView(view: View | null): void;
   render(list: RenderList): void;
   stats(): RenderStats;
   /** Called when the GPU device/context is lost and the backend is unusable. */

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
-    "bench": "node scripts/bench.mjs"
+    "bench": "node scripts/bench.mjs",
+    "e2e": "node scripts/e2e-editor.mjs"
   },
   "dependencies": {
     "harfbuzzjs": "^1.6.3",

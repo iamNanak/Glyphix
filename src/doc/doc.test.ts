@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { cubicBezier, ease, Easings, spring } from './easing';
 import { createDemoDoc } from './demo';
 import { easingLUT, evaluate, glyphProgress, glyphRanks, sampleProp } from './evaluate';
-import { History, makeInsert, makeSet } from './history';
+import { History, makeInsert, makeMove, makeRemove, makeSet } from './history';
+import { offsetProp } from './props';
 import { seededPermutation } from './random';
 import type { Doc, GlyphAnimator } from './types';
 
@@ -108,5 +109,36 @@ describe('history', () => {
     h.commit(makeInsert(['comp', 'layers'], 1, layer, 'Duplicate'));
     expect(h.current.comp.layers.map((l) => l.id)).toEqual(['bg', 'copy', 'shot', 'headline']);
     expect(h.undo()).toEqual(doc);
+  });
+});
+
+describe('history gestures & array ops', () => {
+  const x = ['comp', 'layers', 1, 'transform', 'x'];
+  it('a gesture is one undo step regardless of pauses', () => {
+    const doc = createDemoDoc();
+    const h = new History<Doc>(doc);
+    h.beginGesture();
+    for (let i = 0; i < 50; i++) h.commit(makeSet(h.current, 'Move', [{ path: x, value: { static: i } }]), i * 5000);
+    h.endGesture();
+    const entryCount = (h as unknown as { past: { forward: unknown[] }[] }).past;
+    expect(entryCount).toHaveLength(1);
+    expect(entryCount[0]!.forward).toHaveLength(1);
+    expect(h.undo()).toEqual(doc);
+  });
+  it('remove and move round-trip', () => {
+    const doc = createDemoDoc();
+    const h = new History<Doc>(doc);
+    const layers = ['comp', 'layers'];
+    h.commit(makeMove(layers, 2, 0, doc.comp.layers[2], 'Send to back'));
+    expect(h.current.comp.layers.map((l) => l.id)).toEqual(['headline', 'bg', 'shot']);
+    h.commit(makeRemove(layers, 2, h.current.comp.layers[2], 'Delete'));
+    expect(h.current.comp.layers.map((l) => l.id)).toEqual(['headline', 'bg']);
+    h.undo();
+    h.undo();
+    expect(h.current).toEqual(doc);
+  });
+  it('offsetProp shifts every keyframe', () => {
+    const p = offsetProp({ track: { keys: [{ t: 0, v: 1, out: Easings.linear }, { t: 1, v: 5, out: Easings.linear }] } }, 10);
+    expect('track' in p && p.track.keys.map((k) => k.v)).toEqual([11, 15]);
   });
 });

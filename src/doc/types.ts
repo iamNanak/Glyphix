@@ -63,10 +63,21 @@ export interface Shadow {
   color: Color;
 }
 
+/** Rectangle in source-normalised coordinates (0..1, origin top-left). */
+export interface CropRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export const FULL_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 };
+
 export interface ImageLayer extends LayerBase {
   type: 'image';
   assetId: string;
-  /** Natural size of the placed image in comp pixels (before transform.scale). */
+  crop: CropRect;
+  /** Displayed size of the (cropped) image in comp pixels, before transform.scale. */
   width: number;
   height: number;
   transform: Transform;
