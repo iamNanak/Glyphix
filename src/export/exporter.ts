@@ -16,7 +16,8 @@ export interface ExportOptions {
 
 async function prepare(doc: Doc, opts: ExportOptions): Promise<{ backend: RenderBackend; canvas: HTMLCanvasElement; width: number; height: number }> {
   const fonts = new Set(doc.comp.layers.flatMap((l) => (l.type === 'text' ? [l.fontId] : [])));
-  await Promise.all([...fonts].map((f) => fontLibrary.load(f)));
+  // Frame bars draw their URL text with the CSS Inter face; make sure it's ready so export matches preview.
+  await Promise.all([...[...fonts].map((f) => fontLibrary.load(f)), document.fonts.load('500 12px Inter')]);
   const scale = opts.scale ?? 1;
   // Encoders need even dimensions.
   const width = Math.round((doc.comp.width * scale) / 2) * 2;

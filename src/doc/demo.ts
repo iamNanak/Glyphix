@@ -1,5 +1,5 @@
 import { Easings } from './easing';
-import { FULL_CROP, SCHEMA_VERSION, type Doc } from './types';
+import { FULL_CROP, NO_FRAME, NO_TILT, SCHEMA_VERSION, type Doc } from './types';
 
 export const DEMO_SCREENSHOT_ASSET = 'demo-screenshot';
 
@@ -22,12 +22,15 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           visible: true,
           locked: true,
           opacity: { static: 1 },
-          angle: { static: 135 },
-          stops: [
-            { offset: 0, color: [0.35, 0.2, 0.95, 1] },
-            { offset: 0.55, color: [0.85, 0.25, 0.65, 1] },
-            { offset: 1, color: [1, 0.6, 0.3, 1] },
-          ],
+          fill: {
+            kind: 'linear',
+            angle: 135,
+            stops: [
+              { offset: 0, color: [0.35, 0.2, 0.95, 1] },
+              { offset: 0.55, color: [0.85, 0.25, 0.65, 1] },
+              { offset: 1, color: [1, 0.6, 0.3, 1] },
+            ],
+          },
         },
         {
           id: 'shot',
@@ -41,6 +44,9 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           height: 760,
           radius: 18,
           shadow: { blur: 60, offsetX: 0, offsetY: 30, color: [0.05, 0.02, 0.15, 0.55] },
+          border: null,
+          frame: NO_FRAME,
+          tilt: NO_TILT,
           opacity: { track: { keys: [{ t: 0, v: 0, out: Easings.easeOutCubic }, { t: 0.8, v: 1, out: Easings.linear }] } },
           transform: {
             x: { static: 960 },

@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
     "bench": "node scripts/bench.mjs",
-    "e2e": "node scripts/e2e-editor.mjs"
+    "e2e": "node scripts/e2e-editor.mjs && node scripts/e2e-styling.mjs"
   },
   "dependencies": {
     "harfbuzzjs": "^1.6.3",

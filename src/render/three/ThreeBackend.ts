@@ -3,7 +3,8 @@ import {
   easingLUT,
   glyphRanks,
   type Color,
-  type GradientItem,
+  type BackgroundItem,
+  type FrameKind,
   type ImageItem,
   type RenderItem,
   type RenderList,
@@ -11,19 +12,24 @@ import {
 } from '@/doc';
 import { assetStore, pickLevel } from '@/assets/assetStore';
 import { fontLibrary, type LaidOutGlyph } from '@/text/fontLibrary';
+import { drawFrameBar } from '@/styling/frameBar';
 import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
 import {
+  BG_MODE,
+  blankTexture,
+  createBackgroundMaterial,
   createGlyphMaterial,
-  createGradientMaterial,
   createImageMaterial,
   createShadowMaterial,
   GLYPH_LUT_SIZE,
+  tiltPlane,
 } from './materials';
 
 const DEG = Math.PI / 180;
 const unitPlane = new THREE.PlaneGeometry(1, 1);
 
 const tmpColor = new THREE.Color();
+const tmpVec3 = new THREE.Vector3();
 
 /** Doc colors are sRGB; shaders work in linear. */
 function setColor(target: THREE.Vector3, c: Color) {
@@ -113,30 +119,110 @@ class TextureCache {
 
 // ---------------------------------------------------------------------------
 
-class GradientNode implements LayerNode {
+class BackgroundNode implements LayerNode {
   readonly root: THREE.Mesh;
-  private m = createGradientMaterial();
+  private m = createBackgroundMaterial();
 
   constructor() {
     this.root = new THREE.Mesh(unitPlane, this.m.mat);
   }
 
   update(raw: RenderItem, ctx: FrameCtx) {
-    const item = raw as GradientItem;
+    const item = raw as BackgroundItem;
     const { u } = this.m;
+    const fill = item.fill;
     this.root.position.set(ctx.width / 2, -ctx.height / 2, 0);
     this.root.scale.set(ctx.width, ctx.height, 1);
     u.size.value.set(ctx.width, ctx.height);
-    u.angle.value = item.angle * DEG;
     u.opacity.value = item.opacity;
-    const stops = item.stops.length ? item.stops : [{ offset: 0, color: [0, 0, 0, 1] as Color }];
-    const at = (i: number) => stops[Math.min(i, stops.length - 1)]!;
-    u.offsets.value.set(at(0).offset, at(1).offset, at(2).offset, at(3).offset);
-    [u.c0, u.c1, u.c2, u.c3].forEach((c, i) => setColor(c.value, at(i).color));
+    u.mode.value = BG_MODE[fill.kind];
+    switch (fill.kind) {
+      case 'solid':
+        setColor(u.c0.value, fill.color);
+        break;
+      case 'linear': {
+        u.angle.value = fill.angle * DEG;
+        const stops = fill.stops.length ? fill.stops : [{ offset: 0, color: [0, 0, 0, 1] as Color }];
+        const at = (i: number) => stops[Math.min(i, stops.length - 1)]!;
+        u.offsets.value.set(at(0).offset, at(1).offset, at(2).offset, at(3).offset);
+        [u.c0, u.c1, u.c2, u.c3].forEach((c, i) => setColor(c.value, at(i).color));
+        break;
+      }
+      case 'mesh':
+        [u.p0, u.p1, u.p2, u.p3].forEach((p, i) => {
+          const pt = fill.points[i];
+          const m = [u.m0, u.m1, u.m2, u.m3][i]!.value;
+          if (pt) {
+            p.value.set(pt.x, pt.y);
+            setColor(tmpVec3, pt.color);
+            m.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, 1);
+          } else m.set(0, 0, 0, 0);
+        });
+        break;
+      case 'image': {
+        // Blurred backgrounds never need many pixels: request a small proxy.
+        const needed = (ctx.width * ctx.pxPerUnit) / Math.max(1, fill.blur / 8);
+        const tex = ctx.textures.get(fill.assetId, needed);
+        const asset = assetStore.get(fill.assetId);
+        u.map.value = tex ?? blankTexture;
+        if (asset) {
+          const a = asset.width / asset.height;
+          const A = ctx.width / ctx.height;
+          u.coverScale.value.set(a > A ? A / a : 1, a > A ? 1 : a / A);
+        }
+        // Blur radius in uv units of the comp; sample from a mip level that roughly matches.
+        u.blurRadius.value = fill.blur / Math.max(ctx.width, ctx.height);
+        u.lod.value = fill.blur > 0 ? Math.log2(1 + fill.blur * ((tex?.image as { width?: number })?.width ?? ctx.width) / ctx.width / 2) : 0;
+        u.dim.value = fill.dim;
+        break;
+      }
+    }
   }
 
   dispose() {
     this.m.mat.dispose();
+  }
+}
+
+/** Frame bar textures, keyed by appearance; regenerated when fonts finish loading. */
+class FrameBarCache {
+  private cache = new Map<string, { tex: THREE.Texture; lastUsed: number }>();
+  private frame = 0;
+
+  get(kind: Exclude<FrameKind, 'none'>, url: string, w: number, h: number): THREE.Texture {
+    // Draw at 2× layer px (capped) so bars stay crisp when zoomed or exported.
+    const res = Math.min(2, 4096 / Math.max(1, w));
+    const fontsReady = typeof document !== 'undefined' && document.fonts.check('500 12px Inter');
+    const key = `${kind}|${url}|${Math.round(w * res)}x${Math.round(h * res)}|${fontsReady}`;
+    const hit = this.cache.get(key);
+    if (hit) {
+      hit.lastUsed = this.frame;
+      return hit.tex;
+    }
+    if (!fontsReady) void document.fonts.load('500 12px Inter');
+    const tex = new THREE.CanvasTexture(drawFrameBar(kind, url, w * res, h * res));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = false;
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.cache.set(key, { tex, lastUsed: this.frame });
+    return tex;
+  }
+
+  /** Drop bars nobody has drawn for a few frames (e.g. intermediate sizes during a crop drag). */
+  endFrame(maxIdleFrames = 30) {
+    this.frame++;
+    for (const [key, e] of this.cache) {
+      if (this.frame - e.lastUsed > maxIdleFrames) {
+        e.tex.dispose();
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  dispose() {
+    this.cache.forEach((e) => e.tex.dispose());
+    this.cache.clear();
   }
 }
 
@@ -147,8 +233,8 @@ class ImageNode implements LayerNode {
   private shadow = createShadowMaterial();
   private shadowMesh: THREE.Mesh;
 
-  constructor() {
-    this.shadowMesh = new THREE.Mesh(unitPlane, this.shadow.mat);
+  constructor(private readonly bars: FrameBarCache) {
+    this.shadowMesh = new THREE.Mesh(tiltPlane, this.shadow.mat);
     this.shadowMesh.userData.order = 1;
     this.root.add(this.shadowMesh);
   }
@@ -156,21 +242,35 @@ class ImageNode implements LayerNode {
   update(raw: RenderItem, ctx: FrameCtx) {
     const item = raw as ImageItem;
     applyTransform(this.root, item);
-    const tex = ctx.textures.get(item.assetId, (item.width / item.crop.w) * item.scale * ctx.pxPerUnit);
+    const w = item.width;
+    const h = item.height + item.frameBar; // full card height
+    const tex = ctx.textures.get(item.assetId, (w / item.crop.w) * item.scale * ctx.pxPerUnit);
     if (tex && !this.image) {
       this.image = createImageMaterial(tex);
-      this.imageMesh = new THREE.Mesh(unitPlane, this.image.mat);
+      this.imageMesh = new THREE.Mesh(tiltPlane, this.image.mat);
       this.imageMesh.userData.order = 2;
       this.root.add(this.imageMesh);
     } else if (tex && this.image && this.image.u.map.value !== tex) {
       this.image.u.map.value = tex; // proxy level or asset changed: rebind, no shader rebuild
     }
+    const tilt = item.tilt;
     if (this.image && this.imageMesh) {
-      this.imageMesh.scale.set(item.width, item.height, 1);
-      this.image.u.size.value.set(item.width, item.height);
-      this.image.u.radius.value = item.radius;
-      this.image.u.crop.value.set(item.crop.x, item.crop.y, item.crop.w, item.crop.h);
-      this.image.u.opacity.value = item.opacity;
+      const u = this.image.u;
+      this.imageMesh.scale.set(w, h, 1);
+      u.size.value.set(w, h);
+      u.bar.value = item.frameBar;
+      u.barMap.value = item.frame.kind === 'none' ? blankTexture : this.bars.get(item.frame.kind, item.frame.url, w, item.frameBar);
+      u.radius.value = item.radius;
+      u.crop.value.set(item.crop.x, item.crop.y, item.crop.w, item.crop.h);
+      u.opacity.value = item.opacity;
+      u.borderWidth.value = item.border?.width ?? 0;
+      if (item.border) {
+        setColor(tmpVec3, item.border.color);
+        u.borderColor.value.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, item.border.color[3]);
+      }
+      u.rotX.value = tilt.rotateX * DEG;
+      u.rotY.value = tilt.rotateY * DEG;
+      u.persp.value = tilt.perspective;
       this.imageMesh.visible = !!tex;
     }
 
@@ -178,17 +278,21 @@ class ImageNode implements LayerNode {
     this.shadowMesh.visible = !!sh && item.opacity > 0;
     if (sh) {
       const margin = sh.blur * 2;
-      const pw = item.width + margin * 2;
-      const ph = item.height + margin * 2;
+      const pw = w + margin * 2;
+      const ph = h + margin * 2;
       this.shadowMesh.position.set(sh.offsetX, -sh.offsetY, 0);
       this.shadowMesh.scale.set(pw, ph, 1);
       const u = this.shadow.u;
       u.planeSize.value.set(pw, ph);
-      u.size.value.set(item.width, item.height);
+      u.offset.value.set(sh.offsetX, -sh.offsetY);
+      u.size.value.set(w, h);
       u.radius.value = item.radius;
       u.blur.value = Math.max(1, sh.blur);
       setColor(u.color.value, sh.color);
       u.alpha.value = sh.color[3] * item.opacity;
+      u.rotX.value = tilt.rotateX * DEG;
+      u.rotY.value = tilt.rotateY * DEG;
+      u.persp.value = tilt.perspective;
     }
   }
 
@@ -310,6 +414,7 @@ export class ThreeBackend implements RenderBackend {
   private camera = new THREE.OrthographicCamera(0, 1920, 0, -1080, -1000, 1000);
   private nodes = new Map<string, LayerNode>();
   private textures: TextureCache;
+  private bars = new FrameBarCache();
   private bufferSize = new THREE.Vector2();
   private cssSize = { width: 1, height: 1 };
   private view: View | null = null;
@@ -399,7 +504,7 @@ export class ThreeBackend implements RenderBackend {
       seen.add(nodeKey);
       let node = this.nodes.get(nodeKey);
       if (!node) {
-        node = item.kind === 'gradient' ? new GradientNode() : item.kind === 'image' ? new ImageNode() : new TextNode();
+        node = item.kind === 'background' ? new BackgroundNode() : item.kind === 'image' ? new ImageNode(this.bars) : new TextNode();
         this.nodes.set(nodeKey, node);
         this.scene.add(node.root);
       }
@@ -420,8 +525,27 @@ export class ThreeBackend implements RenderBackend {
       this.atlasVersion = fontLibrary.atlasVersion;
     }
     this.lastStats = ctx.stats;
-    this.renderer.render(this.scene, this.camera);
+    const r = this.renderer;
+    if (v) {
+      // Preview: clip to the artboard so the preview never shows what the export would crop.
+      // Clear the whole canvas first: WebGL's clear honours the scissor rect.
+      r.autoClear = false;
+      r.setScissorTest(false);
+      r.clear();
+      const sx0 = Math.max(0, Math.floor(v.offsetX));
+      const sy0 = Math.max(0, Math.floor(v.offsetY));
+      const sx1 = Math.min(this.cssSize.width, Math.ceil(v.offsetX + list.width * v.zoom));
+      const sy1 = Math.min(this.cssSize.height, Math.ceil(v.offsetY + list.height * v.zoom));
+      r.setScissor(sx0, sy0, Math.max(0, sx1 - sx0), Math.max(0, sy1 - sy0));
+      r.setScissorTest(true);
+      r.render(this.scene, this.camera);
+      r.setScissorTest(false);
+    } else {
+      r.autoClear = true;
+      r.render(this.scene, this.camera);
+    }
     this.textures.endFrame();
+    this.bars.endFrame();
   }
 
   stats(): RenderStats {
@@ -433,6 +557,7 @@ export class ThreeBackend implements RenderBackend {
     this.nodes.forEach((n) => n.dispose());
     this.nodes.clear();
     this.textures.dispose();
+    this.bars.dispose();
     this.atlas.dispose();
     this.renderer.dispose();
   }

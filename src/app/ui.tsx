@@ -51,3 +51,33 @@ export function Section({ title, children }: { title: string; children: ReactNod
     </section>
   );
 }
+
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T | string;
+  options: { value: T; label: string; disabled?: boolean }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex rounded-md bg-panel-2 p-0.5 ring-1 ring-line">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          disabled={o.disabled}
+          onClick={() => onChange(o.value)}
+          className={`flex-1 rounded px-1.5 py-1 text-xs transition disabled:opacity-35 ${value === o.value ? 'bg-accent text-white' : 'text-zinc-300 hover:text-white'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}

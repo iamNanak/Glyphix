@@ -49,11 +49,25 @@ export interface Transform {
   rotation: Prop<number>;
 }
 
+export interface MeshPoint {
+  /** Position in comp-normalised coords (0..1). */
+  x: number;
+  y: number;
+  color: Color;
+}
+
+export type BackgroundFill =
+  | { kind: 'solid'; color: Color }
+  /** angle in degrees (0 = left→right, 90 = top→bottom); up to 4 stops are rendered. */
+  | { kind: 'linear'; angle: number; stops: GradientStop[] }
+  /** Smoothly blended colour points (up to 4). */
+  | { kind: 'mesh'; points: MeshPoint[] }
+  /** Image covering the comp, optionally blurred and dimmed. */
+  | { kind: 'image'; assetId: string; blur: number; dim: number };
+
 export interface BackgroundLayer extends LayerBase {
   type: 'background';
-  /** Linear gradient angle in degrees (0 = left→right, 90 = top→bottom). */
-  angle: Prop<number>;
-  stops: GradientStop[];
+  fill: BackgroundFill;
 }
 
 export interface Shadow {
@@ -73,17 +87,43 @@ export interface CropRect {
 
 export const FULL_CROP: CropRect = { x: 0, y: 0, w: 1, h: 1 };
 
+export type FrameKind = 'none' | 'macos-light' | 'macos-dark' | 'browser-light' | 'browser-dark';
+
+export interface Frame {
+  kind: FrameKind;
+  /** Shown in the browser address bar. */
+  url: string;
+}
+
+export interface Border {
+  width: number;
+  color: Color;
+}
+
+/** 3D tilt of a flat layer, degrees. Perspective distance in comp px. */
+export interface Tilt {
+  rotateX: Prop<number>;
+  rotateY: Prop<number>;
+  perspective: number;
+}
+
 export interface ImageLayer extends LayerBase {
   type: 'image';
   assetId: string;
   crop: CropRect;
-  /** Displayed size of the (cropped) image in comp pixels, before transform.scale. */
+  /** Displayed size of the (cropped) image in comp pixels, before transform.scale. Excludes the frame bar. */
   width: number;
   height: number;
   transform: Transform;
   radius: number;
   shadow: Shadow | null;
+  border: Border | null;
+  frame: Frame;
+  tilt: Tilt;
 }
+
+export const NO_FRAME: Frame = { kind: 'none', url: '' };
+export const NO_TILT: Tilt = { rotateX: { static: 0 }, rotateY: { static: 0 }, perspective: 2400 };
 
 export type StaggerOrder = 'forward' | 'reverse' | 'center' | 'random';
 

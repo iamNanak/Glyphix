@@ -1,4 +1,4 @@
-import { FULL_CROP, type Comp, type ImageLayer } from './types';
+import { FULL_CROP, NO_FRAME, NO_TILT, type Comp, type ImageLayer } from './types';
 
 export function newLayerId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -24,6 +24,9 @@ export function createImageLayer(comp: Comp, assetId: string, srcW: number, srcH
     height,
     radius: 16,
     shadow: { blur: 60, offsetX: 0, offsetY: 30, color: [0, 0, 0, 0.45] },
+    border: null,
+    frame: NO_FRAME,
+    tilt: NO_TILT,
     opacity: { static: 1 },
     transform: { x: { static: comp.width / 2 }, y: { static: comp.height / 2 }, scale: { static: 1 }, rotation: { static: 0 } },
   };

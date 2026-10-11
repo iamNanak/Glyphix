@@ -1,12 +1,15 @@
 import { ease } from './easing';
 import { seededPermutation } from './random';
+import { frameBarHeight } from './frame';
 import type {
   Color,
   CropRect,
   Doc,
   Easing,
   GlyphAnimator,
-  GradientStop,
+  BackgroundFill,
+  Border,
+  Frame,
   Prop,
   Shadow,
   StaggerOrder,
@@ -24,12 +27,11 @@ export interface ResolvedTransform {
   rotation: number;
 }
 
-export interface GradientItem {
-  kind: 'gradient';
+export interface BackgroundItem {
+  kind: 'background';
   id: string;
   opacity: number;
-  angle: number;
-  stops: GradientStop[];
+  fill: BackgroundFill;
 }
 
 export interface ImageItem extends ResolvedTransform {
@@ -42,6 +44,11 @@ export interface ImageItem extends ResolvedTransform {
   opacity: number;
   radius: number;
   shadow: Shadow | null;
+  border: Border | null;
+  frame: Frame;
+  /** Frame bar height in comp px (scale 1); 0 when there's no frame. */
+  frameBar: number;
+  tilt: { rotateX: number; rotateY: number; perspective: number };
 }
 
 export interface TextItem extends ResolvedTransform {
@@ -60,7 +67,7 @@ export interface TextItem extends ResolvedTransform {
   animator: GlyphAnimator | null;
 }
 
-export type RenderItem = GradientItem | ImageItem | TextItem;
+export type RenderItem = BackgroundItem | ImageItem | TextItem;
 
 export interface RenderList {
   width: number;
@@ -106,7 +113,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
     const opacity = sampleProp(layer.opacity, t);
     switch (layer.type) {
       case 'background':
-        items.push({ kind: 'gradient', id: layer.id, opacity, angle: sampleProp(layer.angle, t), stops: layer.stops });
+        items.push({ kind: 'background', id: layer.id, opacity, fill: layer.fill });
         break;
       case 'image':
         items.push({
@@ -119,6 +126,10 @@ export function evaluate(doc: Doc, t: number): RenderList {
           opacity,
           radius: layer.radius,
           shadow: layer.shadow,
+          border: layer.border,
+          frame: layer.frame,
+          frameBar: frameBarHeight(layer),
+          tilt: { rotateX: sampleProp(layer.tilt.rotateX, t), rotateY: sampleProp(layer.tilt.rotateY, t), perspective: layer.tilt.perspective },
           ...resolveTransform(layer.transform, t),
         });
         break;

@@ -199,8 +199,9 @@ function usePlaybackClock() {
 function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const typing = target.closest('input, textarea, select, [contenteditable]') && !(target instanceof HTMLInputElement && target.type === 'range');
+      const target = e.target;
+      const typing =
+        target instanceof Element && target.closest('input, textarea, select, [contenteditable]') && !(target instanceof HTMLInputElement && target.type === 'range');
       if (typing) return;
       const s = useEditor.getState();
       const v = useView.getState();

@@ -6,3 +6,4 @@ export * from './random';
 export * from './demo';
 export * from './layers';
 export * from './props';
+export * from './frame';
