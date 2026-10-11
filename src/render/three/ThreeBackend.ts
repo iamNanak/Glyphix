@@ -9,7 +9,7 @@ import {
   type RenderList,
   type TextItem,
 } from '@/doc';
-import { assetStore } from '@/assets/assetStore';
+import { assetStore, pickLevel } from '@/assets/assetStore';
 import { fontLibrary, type LaidOutGlyph } from '@/text/fontLibrary';
 import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats } from '../backend';
 import {
@@ -50,29 +50,55 @@ interface FrameCtx {
   height: number;
   textures: TextureCache;
   atlas: THREE.DataTexture;
+  /** Device pixels per comp pixel. */
+  pxPerUnit: number;
   stats: { glyphs: number };
 }
 
 // ---------------------------------------------------------------------------
 
+/**
+ * GPU textures per (asset, proxy level). Picks the smallest proxy that is still sharp at the
+ * on-screen size; export backends force full resolution. Entries unused for a while are evicted.
+ */
 class TextureCache {
-  private cache = new Map<string, { tex: THREE.Texture; version: number }>();
+  private cache = new Map<string, { tex: THREE.Texture; version: number; lastUsed: number }>();
+  private frame = 0;
 
-  get(assetId: string): THREE.Texture | null {
+  constructor(private readonly fullRes: boolean) {}
+
+  /** @param neededWidth on-screen width of the layer in device pixels */
+  get(assetId: string, neededWidth: number): THREE.Texture | null {
     const asset = assetStore.get(assetId);
     if (!asset) return null;
-    const hit = this.cache.get(assetId);
-    if (hit && hit.version === asset.version) return hit.tex;
+    const level = this.fullRes ? 0 : pickLevel(asset, neededWidth);
+    const key = `${assetId}@${level}`;
+    const hit = this.cache.get(key);
+    if (hit && hit.version === asset.version) {
+      hit.lastUsed = this.frame;
+      return hit.tex;
+    }
     hit?.tex.dispose();
-    const tex = new THREE.Texture(asset.source as THREE.Texture['image']);
+    const tex = new THREE.Texture(asset.levels[level]!.source as THREE.Texture['image']);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.flipY = false;
     tex.generateMipmaps = true;
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.magFilter = THREE.LinearFilter;
     tex.needsUpdate = true;
-    this.cache.set(assetId, { tex, version: asset.version });
+    this.cache.set(key, { tex, version: asset.version, lastUsed: this.frame });
     return tex;
+  }
+
+  /** Call once per frame after rendering. */
+  endFrame(maxIdleFrames = 180) {
+    this.frame++;
+    for (const [key, entry] of this.cache) {
+      if (this.frame - entry.lastUsed > maxIdleFrames) {
+        entry.tex.dispose();
+        this.cache.delete(key);
+      }
+    }
   }
 
   get size() {
@@ -120,26 +146,24 @@ class ImageNode implements LayerNode {
   private imageMesh: THREE.Mesh | null = null;
   private shadow = createShadowMaterial();
   private shadowMesh: THREE.Mesh;
-  private boundTexture: THREE.Texture | null = null;
 
   constructor() {
     this.shadowMesh = new THREE.Mesh(unitPlane, this.shadow.mat);
+    this.shadowMesh.userData.order = 1;
     this.root.add(this.shadowMesh);
   }
 
   update(raw: RenderItem, ctx: FrameCtx) {
     const item = raw as ImageItem;
     applyTransform(this.root, item);
-    const tex = ctx.textures.get(item.assetId);
-    if (tex && tex !== this.boundTexture) {
-      if (this.imageMesh) {
-        this.root.remove(this.imageMesh);
-        this.image!.mat.dispose();
-      }
+    const tex = ctx.textures.get(item.assetId, item.width * item.scale * ctx.pxPerUnit);
+    if (tex && !this.image) {
       this.image = createImageMaterial(tex);
       this.imageMesh = new THREE.Mesh(unitPlane, this.image.mat);
+      this.imageMesh.userData.order = 2;
       this.root.add(this.imageMesh);
-      this.boundTexture = tex;
+    } else if (tex && this.image && this.image.u.map.value !== tex) {
+      this.image.u.map.value = tex; // proxy level or asset changed: rebind, no shader rebuild
     }
     if (this.image && this.imageMesh) {
       this.imageMesh.scale.set(item.width, item.height, 1);
@@ -284,7 +308,8 @@ export class ThreeBackend implements RenderBackend {
   private scene = new THREE.Scene();
   private camera = new THREE.OrthographicCamera(0, 1920, 0, -1080, -1000, 1000);
   private nodes = new Map<string, LayerNode>();
-  private textures = new TextureCache();
+  private textures: TextureCache;
+  private bufferSize = new THREE.Vector2();
   private atlas: THREE.DataTexture;
   private atlasVersion = -1;
   private lastStats = { glyphs: 0 };
@@ -292,7 +317,9 @@ export class ThreeBackend implements RenderBackend {
   private constructor(
     private renderer: THREE.WebGPURenderer,
     readonly kind: BackendKind,
+    fullResAssets: boolean,
   ) {
+    this.textures = new TextureCache(fullResAssets);
     this.atlas = new THREE.DataTexture(fontLibrary.atlas, fontLibrary.atlasSize, fontLibrary.atlasSize, THREE.RedFormat, THREE.UnsignedByteType);
     this.atlas.flipY = false;
     this.atlas.minFilter = THREE.LinearFilter;
@@ -316,7 +343,7 @@ export class ThreeBackend implements RenderBackend {
     renderer.setClearColor(0x000000, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const backend = renderer.backend as { isWebGPUBackend?: boolean };
-    return new ThreeBackend(renderer, backend.isWebGPUBackend ? 'webgpu' : 'webgl2');
+    return new ThreeBackend(renderer, backend.isWebGPUBackend ? 'webgpu' : 'webgl2', opts.fullResAssets ?? false);
   }
 
   get canvas() {
@@ -339,7 +366,16 @@ export class ThreeBackend implements RenderBackend {
       this.atlasVersion = fontLibrary.atlasVersion;
     }
 
-    const ctx: FrameCtx = { t: list.t, width: list.width, height: list.height, textures: this.textures, atlas: this.atlas, stats: { glyphs: 0 } };
+    this.renderer.getDrawingBufferSize(this.bufferSize);
+    const ctx: FrameCtx = {
+      t: list.t,
+      width: list.width,
+      height: list.height,
+      textures: this.textures,
+      atlas: this.atlas,
+      pxPerUnit: this.bufferSize.x / list.width,
+      stats: { glyphs: 0 },
+    };
     const seen = new Set<string>();
     list.items.forEach((item, order) => {
       const nodeKey = `${item.kind}:${item.id}`;
@@ -351,7 +387,8 @@ export class ThreeBackend implements RenderBackend {
         this.scene.add(node.root);
       }
       node.update(item, ctx);
-      node.root.traverse((o) => (o.renderOrder = order * 10 + (o === node!.root ? 0 : 1)));
+      // Children may set userData.order (0..9) to stack within their layer.
+      node.root.traverse((o) => (o.renderOrder = order * 10 + ((o.userData.order as number | undefined) ?? 0)));
     });
     for (const [key, node] of this.nodes) {
       if (!seen.has(key)) {
@@ -367,6 +404,7 @@ export class ThreeBackend implements RenderBackend {
     }
     this.lastStats = ctx.stats;
     this.renderer.render(this.scene, this.camera);
+    this.textures.endFrame();
   }
 
   stats(): RenderStats {

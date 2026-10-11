@@ -4,3 +4,4 @@ export * from './evaluate';
 export * from './history';
 export * from './random';
 export * from './demo';
+export * from './layers';

@@ -22,7 +22,7 @@ async function prepare(doc: Doc, opts: ExportOptions): Promise<{ backend: Render
   const width = Math.round((doc.comp.width * scale) / 2) * 2;
   const height = Math.round((doc.comp.height * scale) / 2) * 2;
   const canvas = document.createElement('canvas');
-  const backend = await createBackend({ canvas, forceWebGL: opts.forceWebGL });
+  const backend = await createBackend({ canvas, forceWebGL: opts.forceWebGL, fullResAssets: true });
   backend.setSize(width, height, 1);
   return { backend, canvas, width, height };
 }

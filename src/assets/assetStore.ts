@@ -1,16 +1,29 @@
-// Minimal in-memory asset store (Milestone A). Milestone B adds content hashing,
-// proxies, off-thread decode, and IndexedDB/OPFS persistence.
+// Asset store: images keyed by content hash, with ½ and ¼ proxies for fast preview.
+// Originals are kept as compressed blobs (for persistence in Milestone C), never as raw pixels in history.
 
 export type AssetSource = ImageBitmap | HTMLCanvasElement | OffscreenCanvas;
 
-export interface Asset {
-  id: string;
+export interface AssetLevel {
   source: AssetSource;
   width: number;
   height: number;
+}
+
+export interface Asset {
+  id: string;
+  /** levels[0] is full resolution; following levels halve each time. */
+  levels: AssetLevel[];
+  width: number;
+  height: number;
+  /** Original encoded file, when the asset came from the user. */
+  blob: Blob | null;
   /** Bumps when the pixels behind an id change, so GPU caches re-upload. */
   version: number;
 }
+
+export const MAX_TEXTURE_DIM = 8192;
+/** Don't make proxies smaller than this (longest side). */
+const MIN_PROXY_DIM = 512;
 
 class AssetStore {
   private assets = new Map<string, Asset>();
@@ -20,9 +33,21 @@ class AssetStore {
     return this.assets.get(id);
   }
 
-  put(id: string, source: AssetSource): Asset {
+  has(id: string): boolean {
+    return this.assets.has(id);
+  }
+
+  put(id: string, source: AssetSource, opts: { levels?: AssetLevel[]; blob?: Blob } = {}): Asset {
     const prev = this.assets.get(id);
-    const asset = { id, source, width: source.width, height: source.height, version: (prev?.version ?? 0) + 1 };
+    const full = { source, width: source.width, height: source.height };
+    const asset: Asset = {
+      id,
+      levels: [full, ...(opts.levels ?? [])],
+      width: source.width,
+      height: source.height,
+      blob: opts.blob ?? null,
+      version: (prev?.version ?? 0) + 1,
+    };
     this.assets.set(id, asset);
     this.listeners.forEach((l) => l());
     return asset;
@@ -36,9 +61,20 @@ class AssetStore {
 
 export const assetStore = new AssetStore();
 
-export const MAX_TEXTURE_DIM = 8192;
+/** Smallest level whose width still covers `neededWidth` device pixels. */
+export function pickLevel(asset: Asset, neededWidth: number): number {
+  for (let i = asset.levels.length - 1; i > 0; i--) {
+    if (asset.levels[i]!.width >= neededWidth) return i;
+  }
+  return 0;
+}
 
-/** Decode a user-supplied image file off the main thread. Rejects images above the GPU limit. */
+async function sha256Hex(blob: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Decode a user-supplied image file (off the main thread) and clamp it to the GPU limit. */
 export async function decodeImage(blob: Blob): Promise<ImageBitmap> {
   const bmp = await createImageBitmap(blob);
   if (bmp.width > MAX_TEXTURE_DIM || bmp.height > MAX_TEXTURE_DIM) {
@@ -52,4 +88,37 @@ export async function decodeImage(blob: Blob): Promise<ImageBitmap> {
     return resized;
   }
   return bmp;
+}
+
+async function makeProxies(full: ImageBitmap): Promise<AssetLevel[]> {
+  const levels: AssetLevel[] = [];
+  let w = full.width;
+  let h = full.height;
+  for (let i = 0; i < 2; i++) {
+    w = Math.round(w / 2);
+    h = Math.round(h / 2);
+    if (Math.max(w, h) < MIN_PROXY_DIM) break;
+    const source = await createImageBitmap(full, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+    levels.push({ source, width: w, height: h });
+  }
+  return levels;
+}
+
+export interface ImportedImage {
+  id: string;
+  width: number;
+  height: number;
+  /** True when this exact file was already in the store. */
+  reused: boolean;
+}
+
+/** Import an image file: content-hash id (dedupes), decode, build proxies. */
+export async function importImage(blob: Blob): Promise<ImportedImage> {
+  const id = `img-${(await sha256Hex(blob)).slice(0, 20)}`;
+  const existing = assetStore.get(id);
+  if (existing) return { id, width: existing.width, height: existing.height, reused: true };
+  const full = await decodeImage(blob);
+  const levels = await makeProxies(full);
+  assetStore.put(id, full, { levels, blob });
+  return { id, width: full.width, height: full.height, reused: false };
 }

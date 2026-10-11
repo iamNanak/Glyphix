@@ -27,6 +27,8 @@ export interface CreateBackendOptions {
   forceWebGL?: boolean;
   /** Keep the drawing buffer readable after present (export / pixel-diff). */
   preserveDrawingBuffer?: boolean;
+  /** Always sample full-resolution assets (export). Preview picks ½/¼ proxies by on-screen size. */
+  fullResAssets?: boolean;
 }
 
 export async function createBackend(opts: CreateBackendOptions = {}): Promise<RenderBackend> {

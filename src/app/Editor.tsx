@@ -6,7 +6,8 @@ import { LayersPanel } from './LayersPanel';
 import { Inspector } from './Inspector';
 import { Button, IconButton } from './ui';
 import { downloadBlob, exportPng, exportVideo } from '@/export/exporter';
-import { assetStore, decodeImage } from '@/assets/assetStore';
+import { importImage } from '@/assets/assetStore';
+import { createImageLayer, fitSize, makeInsert } from '@/doc';
 import { layerIndex } from './store';
 
 export function Editor() {
@@ -208,20 +209,27 @@ function usePasteImage(onError: (msg: string | null) => void) {
   const place = useCallback(
     async (file: File) => {
       try {
-        const bmp = await decodeImage(file);
-        const id = `img-${Date.now().toString(36)}`;
-        assetStore.put(id, bmp);
+        const started = performance.now();
+        const img = await importImage(file);
         const s = useEditor.getState();
-        const idx = layerIndex(s.doc, 'shot');
-        if (idx < 0) return;
-        // Fit inside the comp with a 10% margin, never upscaling past 1:1.
-        const { width: cw, height: ch } = s.doc.comp;
-        const fit = Math.min(1, (cw * 0.72) / bmp.width, (ch * 0.72) / bmp.height);
-        s.set('Replace screenshot', [
-          { path: ['comp', 'layers', idx, 'assetId'], value: id },
-          { path: ['comp', 'layers', idx, 'width'], value: Math.round(bmp.width * fit) },
-          { path: ['comp', 'layers', idx, 'height'], value: Math.round(bmp.height * fit) },
-        ]);
+        const selected = s.doc.comp.layers.find((l) => l.id === s.selectedId);
+        if (selected?.type === 'image') {
+          // Replace the selected image, keeping its position and styling.
+          const idx = layerIndex(s.doc, selected.id);
+          const { width, height } = fitSize(s.doc.comp, img.width, img.height);
+          s.set('Replace image', [
+            { path: ['comp', 'layers', idx, 'assetId'], value: img.id },
+            { path: ['comp', 'layers', idx, 'width'], value: width },
+            { path: ['comp', 'layers', idx, 'height'], value: height },
+          ]);
+        } else {
+          const layer = createImageLayer(s.doc.comp, img.id, img.width, img.height, file.name.replace(/\.[^.]+$/, '') || 'Image');
+          const at = selected ? layerIndex(s.doc, selected.id) + 1 : s.doc.comp.layers.length;
+          s.commit(makeInsert(['comp', 'layers'], at, layer, 'Add image'));
+          s.select(layer.id);
+        }
+        console.info(`[glyphix] image ${img.width}×${img.height} placed in ${Math.round(performance.now() - started)} ms`);
+        onError(null);
       } catch (e) {
         onError(`Could not read that image: ${String(e)}`);
       }
