@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { createDemoDoc, type Doc } from '@/doc';
 import { useEditor } from '@/app/store';
 import { exportPng } from '@/export/exporter';
-import { getLastProjectId, loadProject, newProjectId, saveProject } from './projects';
+import { getLastProjectId, loadProject, newProjectId, saveProject, setThumbnail } from './projects';
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -83,7 +83,7 @@ export function startAutosave(): () => void {
 export function refreshThumbnail(doc: Doc): Promise<void> {
   inFlight = inFlight.then(async () => {
     const thumb = await thumbnail(doc, true);
-    if (thumb) await saveProject(doc, thumb);
+    if (thumb) await setThumbnail(doc.id, thumb);
   });
   return inFlight;
 }

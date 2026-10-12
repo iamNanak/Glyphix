@@ -152,9 +152,10 @@
   --primitive-font-sans: var(--font-sans);
   --primitive-font-display: var(--font-display);
   --primitive-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --primitive-control-solid: #8b5cf6;
-  --primitive-control-solid-hover: #a78bfa;
-  --primitive-control-solid-active: #7c3aed;
+  /* violet-600: white text on it passes WCAG AA (5.7:1); #8b5cf6 only reached 4.2:1. */
+  --primitive-control-solid: #7c3aed;
+  --primitive-control-solid-hover: #8b5cf6;
+  --primitive-control-solid-active: #6d28d9;
   --primitive-control-solid-foreground: #ffffff;
   --primitive-chart-1: #3987e5;
   --primitive-chart-2: #199e70;

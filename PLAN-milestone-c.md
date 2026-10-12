@@ -41,3 +41,24 @@ Branch: `milestone-c` (stacked on `milestone-b`).
 | C6 | Export dialog: PNG/JPEG/WebP 1–4×, MP4, GIF, progress, cancel | e2e exports every format; pixels checked; cancel works |
 | C7 | Finishing: PWA manifest + icons, keyboard pass, Lighthouse a11y ≥ 90, success-criteria run | report of every Phase 1 criterion with numbers |
 | C8 | (optional) Export in a Worker with OffscreenCanvas | same output as main-thread export (pixel diff) |
+
+## Status (2026-10-12)
+
+C1–C7 done; C8 (Worker export) not started — optional, since MP4 export already meets its gate on the main thread.
+
+Phase 1 success criteria, measured headless on an Intel Iris Xe laptop GPU (Chrome 145+, Vulkan flags; Firefox via Playwright):
+
+| Criterion | Result |
+|---|---|
+| Paste a 4K screenshot → styled and visible < 500 ms | 350–440 ms (decode + ½/¼ proxies + first frame) |
+| Drag at 60 fps; 10 layers at 4K | drag p95 16.7 ms; 4K × 10 layers p95 16.7 ms (WebGPU and WebGL2) |
+| Forced WebGL2 has every Phase 1 feature | all e2e suites pass on WebGL2 paths; Firefox suites pass |
+| 300 animated glyphs at 60 fps | p95 16.8 ms (1000 glyphs too) |
+| Undo/redo for every edit, < 50 ms per step | 0.1–7 ms per step |
+| Reload restores the last project | e2e-persistence (identical doc + images) |
+| PNG export pixel-identical to preview | max Δ 0, checked mid-animation |
+| 5 s 1080p30 MP4 in ≤ 5 s, frame-for-frame | 4.6 s in Chrome; Firefox 13–16 s (software H.264 encoder) |
+| Lighthouse accessibility ≥ 90; every tool keyboard-reachable | accessibility 100, best practices 100; e2e-keyboard 13/13 (Chrome + Firefox) |
+| Installable PWA | manifest + icons + service worker; loads offline |
+
+Not verified: Safari 26 (no macOS here); real (non-headless) Firefox preview canvas; Lighthouse/keyboard on a screen reader.

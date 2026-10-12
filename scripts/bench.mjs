@@ -19,7 +19,9 @@ for (const webgl of [false, true]) {
   await page.waitForTimeout(1500);
   for (const scene of ['Demo', '300 glyphs', '1000 glyphs', '4K + 10 layers']) {
     await page.getByRole('button', { name: scene, exact: true }).click();
-    await page.waitForTimeout(4000);
+    // Rolling window = last 240 frames (~4 s); wait longer so one-time work (shader compiles,
+    // texture uploads) after switching scene falls outside it.
+    await page.waitForTimeout(6500);
     const s = await stats();
     console.log(`${webgl ? 'webgl2' : 'webgpu'} | ${scene.padEnd(15)} | fps ${s['fps (p50)']} | p95 ${s['frame p95']} | cpu p95 ${s['cpu p95']} | glyphs ${s['glyphs']} | draws ${s['draw calls']} | vram ${s['VRAM est.']}`);
     await page.screenshot({ path: `${out}/bench-${webgl ? 'webgl2' : 'webgpu'}-${scene.replace(/\W+/g, '_')}.png` });

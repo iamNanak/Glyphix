@@ -105,6 +105,7 @@ const b3 = await page.evaluate(() => window.__glyphix.box('shot'));
 p = await scr(b3.cx, b3.cy);
 await page.mouse.dblclick(p.x, p.y);
 check('double-click enters crop mode', (await state()).cropId === 'shot');
+await page.waitForSelector('[data-handle="crop-e"]'); // handles render a frame later
 const east = await scr(b3.cx + b3.w / 2, b3.cy);
 await page.mouse.move(east.x, east.y);
 await page.mouse.down();

@@ -124,6 +124,12 @@ export function Overlay() {
 
   const onPointerMove = (e: RPointerEvent) => {
     const d = drag.current;
+    // The button was released somewhere we didn't hear about (outside the window, lost capture):
+    // finish the gesture instead of letting the next hover keep dragging.
+    if (d && e.buttons === 0) {
+      finishDrag();
+      return;
+    }
     if (!d) {
       if (e.buttons === 0 && !editingTextId) {
         const s = useEditor.getState();
@@ -156,6 +162,9 @@ export function Overlay() {
         dy += snap.dy;
         setGuides({ xs: snap.guidesX, ys: snap.guidesY });
       } else setGuides({ xs: [], ys: [] });
+      // Round to 1/1000 px so snapped positions are exact (no 960.0000000000001 in the document).
+      dx = Math.round(dx * 1000) / 1000;
+      dy = Math.round(dy * 1000) / 1000;
       patches.push({ path: [...base, 'transform', 'x'], value: offsetProp(tr.x, dx) }, { path: [...base, 'transform', 'y'], value: offsetProp(tr.y, dy) });
     } else if (d.kind === 'scale') {
       const r = scaleFromCorner(d.startBox, d.corner, p);
@@ -182,13 +191,18 @@ export function Overlay() {
     s.set(labelFor(d.kind), patches);
   };
 
-  const onPointerUp = (e: RPointerEvent) => {
+  const finishDrag = () => {
     const d = drag.current;
     if (!d) return;
     drag.current = null;
-    ref.current!.releasePointerCapture(e.pointerId);
     if (d.kind !== 'pan') useEditor.getState().endGesture();
     setGuides({ xs: [], ys: [] });
+  };
+
+  const onPointerUp = (e: RPointerEvent) => {
+    if (!drag.current) return;
+    if (ref.current!.hasPointerCapture(e.pointerId)) ref.current!.releasePointerCapture(e.pointerId);
+    finishDrag();
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
@@ -209,6 +223,7 @@ export function Overlay() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onLostPointerCapture={finishDrag}
       onPointerLeave={() => setHoverId(null)}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => e.preventDefault()}

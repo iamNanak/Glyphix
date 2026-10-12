@@ -41,7 +41,7 @@ export const IconButton = forwardRef<HTMLButtonElement, NativeButton & { label: 
 
 export function Button({ children, variant = 'secondary', className = '', ...rest }: NativeButton & { variant?: 'primary' | 'secondary' }) {
   return (
-    <WButton type="button" size="sm" variant={variant === 'primary' ? 'default' : 'secondary'} className={`gap-1.5 ${variant === 'primary' ? 'bg-accent text-white hover:bg-violet-400' : ''} ${className}`} {...rest}>
+    <WButton type="button" size="sm" variant={variant === 'primary' ? 'default' : 'secondary'} className={`gap-1.5 ${variant === 'primary' ? 'bg-violet-600 text-white hover:bg-violet-500' : ''} ${className}`} {...rest}>
       {children}
     </WButton>
   );

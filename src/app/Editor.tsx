@@ -117,7 +117,7 @@ function Toolbar({ backend, onProjects, onExport }: { backend: string; onProject
   return (
     <header className="flex items-center gap-2 border-b border-line bg-panel px-3">
       <span className="mr-3 text-[15px] font-semibold tracking-tight">
-        Glyph<span className="text-accent">ix</span>
+        Glyph<span className="text-violet-400">ix</span>
       </span>
       <IconButton label="Projects" onClick={onProjects}>
         <FolderOpen size={16} />

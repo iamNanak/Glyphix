@@ -63,6 +63,15 @@ export async function saveProject(doc: Doc, thumbnail?: Blob): Promise<void> {
 }
 
 /**
+ * Attach a thumbnail to an existing project. Never creates a project (a thumbnail rendered for a
+ * project that was deleted meanwhile must not bring it back) and doesn't change its edit time.
+ */
+export async function setThumbnail(id: string, thumbnail: Blob): Promise<void> {
+  const rec = await get<ProjectRecord>('projects', id);
+  if (rec) await put('projects', { ...rec, thumbnail } satisfies ProjectRecord);
+}
+
+/**
  * Load a project and decode its images into the asset store. Missing images don't fail the load
  * (the document is still the user's work); their ids are returned so the UI can say so.
  */

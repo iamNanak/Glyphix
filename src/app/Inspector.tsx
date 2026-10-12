@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'react';
 import { AnimationSection } from './AnimationSection';
+import { CropSection, TransformSection } from './TransformSection';
 import {
   Easings,
   isGlyphPreset,
@@ -279,6 +280,7 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
 
   return (
     <>
+      <TransformSection layer={layer} edit={edit} />
       <Section title="Frame">
         <PresetGrid label="Frame" value={layer.frame.kind} options={FRAMES} onChange={(kind) => edit('Frame', ['frame', 'kind'], kind)} />
         {layer.frame.kind.startsWith('browser') && (
@@ -313,6 +315,7 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
         </div>
       </Section>
 
+      <CropSection layer={layer} index={index} />
       <Section title="Shadow">
         <PresetGrid
           label="Shadow preset"
@@ -378,6 +381,7 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
           <ColorField value={layer.color} onChange={(c) => edit('Text colour', ['color'], c)} />
         </Field>
       </Section>
+      <TransformSection layer={layer} edit={edit} />
       {anim && (
         <Section title="Custom glyph animation">
           <SelectField
