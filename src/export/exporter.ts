@@ -45,6 +45,8 @@ export async function exportPng(doc: Doc, t: number, opts: ExportOptions = {}): 
     bmp.close();
     return await out.convertToBlob({ type: 'image/png' });
   } finally {
+    // Let queued GPU work finish first, or WebGPU logs errors from pending error scopes.
+    await backend.idle().catch(() => {});
     backend.dispose();
   }
 }
@@ -90,6 +92,8 @@ export async function exportVideo(doc: Doc, opts: ExportOptions = {}): Promise<V
       ms: performance.now() - started,
     };
   } finally {
+    // Let queued GPU work finish first, or WebGPU logs errors from pending error scopes.
+    await backend.idle().catch(() => {});
     backend.dispose();
   }
 }

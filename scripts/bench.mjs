@@ -1,18 +1,11 @@
 // Headless bench run: for each scene, report frame stats, then run the gate buttons.
 // Usage: node scripts/bench.mjs [baseUrl] [outDir]
 // Note: headless numbers are indicative only; real gates need a real iGPU laptop.
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5173';
 const out = process.argv[3] ?? '.';
-// Headless Chrome screenshots of a WebGPU canvas are blank unless a frame is being rendered at
-// capture time (headed Chrome is fine). Set HEADED=1 (needs a display) for trustworthy WebGPU screenshots.
-// In-app pixel checks are unaffected: they read pixels in the same task as the render.
-const browser = await chromium.launch({
-  headless: !process.env.HEADED,
-  executablePath: process.env.CHROME ?? '/usr/bin/google-chrome',
-  args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--ignore-gpu-blocklist'],
-});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));

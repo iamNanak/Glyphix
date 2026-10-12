@@ -5,6 +5,8 @@ import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
 import { Inspector } from './Inspector';
 import { Button, IconButton } from './ui';
+import { Slider } from '@/components/wensity/slider';
+import { Switch } from '@/components/wensity/switch';
 import { downloadBlob, exportPng, exportVideo } from '@/export/exporter';
 import { importImage } from '@/assets/assetStore';
 import { createImageLayer, fitSize, makeInsert, offsetProp } from '@/doc';
@@ -12,44 +14,29 @@ import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
 import { layerIndex } from './store';
 
+// Subscriptions are kept as low in the tree as possible: during a drag only <Stage> (canvas +
+// overlay) re-renders; panels subscribe to the narrow slices they display.
 export function Editor() {
-  const doc = useEditor((s) => s.doc);
-  const time = useEditor((s) => s.time);
-  const forceWebGL = useEditor((s) => s.forceWebGL);
   const [backend, setBackend] = useState<string>('…');
-  const view = useView((s) => s.view);
-  const setHost = useView((s) => s.setHost);
-  const setComp = useView((s) => s.setComp);
-  useEffect(() => setComp(doc.comp.width, doc.comp.height), [doc.comp.width, doc.comp.height, setComp]);
   const [error, setError] = useState<string | null>(null);
   usePlaybackClock();
   useShortcuts();
   usePasteImage(setError);
 
   return (
-    <div className="grid h-full grid-rows-[48px_1fr_88px] bg-surface text-sm">
+    <div className="grid h-full grid-rows-[48px_1fr_88px] bg-app text-sm">
       <Toolbar backend={backend} />
       <div className="grid min-h-0 grid-cols-[220px_1fr_288px]">
         <LayersPanel />
         <main className="relative min-h-0 min-w-0 bg-[radial-gradient(circle_at_center,#16161f_0,#0b0b0f_70%)]">
-          <Viewport
-            doc={doc}
-            time={time}
-            forceWebGL={forceWebGL}
-            view={view}
-            onHostResize={setHost}
-            onStats={(s) => setBackend(s.backend)}
-            onError={setError}
-          >
-            <Overlay />
-          </Viewport>
+          <Stage onBackend={setBackend} onError={setError} />
           <ZoomControls />
           {error && (
             <div role="alert" className="absolute top-3 left-1/2 -translate-x-1/2 rounded-md bg-red-500/15 px-3 py-2 text-xs text-red-200 ring-1 ring-red-500/40">
               {error}
             </div>
           )}
-          <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-muted">Paste or drop an image · double-click text to edit, image to crop</p>
+          <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-dim">Paste or drop an image · double-click text to edit, image to crop</p>
         </main>
         <Inspector />
       </div>
@@ -60,15 +47,43 @@ export function Editor() {
 
 // ---------------------------------------------------------------------------
 
-function Toolbar({ backend }: { backend: string }) {
-  const { undo, redo, canUndo, canRedo, forceWebGL, setForceWebGL } = useEditor();
+function Stage({ onBackend, onError }: { onBackend: (kind: string) => void; onError: (msg: string | null) => void }) {
   const doc = useEditor((s) => s.doc);
   const time = useEditor((s) => s.time);
+  const forceWebGL = useEditor((s) => s.forceWebGL);
+  const view = useView((s) => s.view);
+  const setHost = useView((s) => s.setHost);
+  const setComp = useView((s) => s.setComp);
+  useEffect(() => setComp(doc.comp.width, doc.comp.height), [doc.comp.width, doc.comp.height, setComp]);
+  const lastKind = useRef('');
+  return (
+    <Viewport
+      doc={doc}
+      time={time}
+      forceWebGL={forceWebGL}
+      view={view}
+      onHostResize={setHost}
+      onStats={(s) => {
+        if (s.backend !== lastKind.current) onBackend((lastKind.current = s.backend));
+      }}
+      onError={onError}
+    >
+      <Overlay />
+    </Viewport>
+  );
+}
+
+function Toolbar({ backend }: { backend: string }) {
+  const canUndo = useEditor((s) => s.canUndo);
+  const canRedo = useEditor((s) => s.canRedo);
+  const forceWebGL = useEditor((s) => s.forceWebGL);
+  const { undo, redo, setForceWebGL } = useEditor.getState();
   const [progress, setProgress] = useState<number | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const onPng = async () => {
+    const { doc, time } = useEditor.getState();
     setStatus('Rendering PNG…');
     try {
       const blob = await exportPng(doc, time, { forceWebGL });
@@ -80,6 +95,7 @@ function Toolbar({ backend }: { backend: string }) {
   };
 
   const onVideo = async () => {
+    const { doc } = useEditor.getState();
     const ac = new AbortController();
     abortRef.current = ac;
     setProgress(0);
@@ -109,13 +125,18 @@ function Toolbar({ backend }: { backend: string }) {
       </IconButton>
 
       <div className="ml-auto flex items-center gap-2">
-        {status && <span className="text-xs text-muted" role="status">{status}</span>}
-        <label className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted ring-1 ring-line">
-          <input type="checkbox" checked={forceWebGL} onChange={(e) => setForceWebGL(e.target.checked)} />
-          Force WebGL2
+        {status && <span className="text-xs text-dim" role="status">{status}</span>}
+        <div className="flex items-center gap-2 rounded-md px-2 py-1 ring-1 ring-line">
+          <Switch
+            switchSize="sm"
+            checked={forceWebGL}
+            onCheckedChange={(checked) => setForceWebGL(checked)}
+            label="Force WebGL2"
+            labelClassName="text-xs text-dim"
+          />
           <span className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 uppercase">{backend}</span>
-        </label>
-        <a href="#/bench" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted hover:text-white">
+        </div>
+        <a href="#/bench" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-dim hover:text-white">
           <Activity size={14} /> Bench
         </a>
         <Button onClick={onPng} disabled={progress !== null}>
@@ -138,8 +159,11 @@ function Toolbar({ backend }: { backend: string }) {
 // ---------------------------------------------------------------------------
 
 function Timeline() {
-  const { time, playing, setPlaying, setTime } = useEditor();
-  const { duration, fps } = useEditor((s) => s.doc.comp);
+  const time = useEditor((s) => s.time);
+  const playing = useEditor((s) => s.playing);
+  const duration = useEditor((s) => s.doc.comp.duration);
+  const fps = useEditor((s) => s.doc.comp.fps);
+  const { setPlaying, setTime } = useEditor.getState();
   const frame = Math.floor(time * fps);
   return (
     <footer className="flex items-center gap-4 border-t border-line bg-panel px-4">
@@ -147,20 +171,20 @@ function Timeline() {
         {playing ? <Pause size={18} /> : <Play size={18} />}
       </IconButton>
       <div className="flex-1">
-        <input
-          type="range"
-          aria-label="Playhead"
-          className="w-full"
+        <Slider
+          label="Playhead"
+          size="sm"
+          showValue={false}
           min={0}
           max={duration}
           step={1 / fps}
           value={time}
-          onChange={(e) => {
+          onValueChange={(t) => {
             setPlaying(false);
-            setTime(Number(e.target.value));
+            setTime(t);
           }}
         />
-        <div className="mt-1 flex justify-between font-mono text-[11px] text-muted tabular-nums">
+        <div className="mt-1 flex justify-between font-mono text-[11px] text-dim tabular-nums">
           <span>
             {time.toFixed(2)}s · frame {frame}
           </span>

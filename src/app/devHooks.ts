@@ -17,6 +17,8 @@ window.__glyphix = {
     return { doc: s.doc, selectedId: s.selectedId, cropId: s.cropId, editingTextId: s.editingTextId, time: s.time };
   },
   view: () => useView.getState().view,
+  /** Raw store access for experiments (dev only). */
+  editor: useEditor,
   setTime: (t: number) => useEditor.getState().setTime(t),
   select: (id: string | null) => useEditor.getState().select(id),
   box: (id: string) => {

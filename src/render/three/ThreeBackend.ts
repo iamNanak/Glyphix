@@ -13,6 +13,7 @@ import {
 import { assetStore, pickLevel } from '@/assets/assetStore';
 import { fontLibrary, type LaidOutGlyph } from '@/text/fontLibrary';
 import { drawFrameBar } from '@/styling/frameBar';
+import { getSharedDevice } from './gpuDevice';
 import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
 import {
   BG_MODE,
@@ -441,12 +442,14 @@ export class ThreeBackend implements RenderBackend {
   }
 
   static async create(opts: CreateBackendOptions): Promise<ThreeBackend> {
+    const device = opts.forceWebGL ? null : await getSharedDevice();
     const renderer = new THREE.WebGPURenderer({
       canvas: opts.canvas as HTMLCanvasElement | undefined,
       antialias: true,
       alpha: true,
       forceWebGL: opts.forceWebGL ?? false,
-    });
+      ...(device ? { device } : {}),
+    } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
     await renderer.init();
     renderer.setClearColor(0x000000, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -551,6 +554,11 @@ export class ThreeBackend implements RenderBackend {
   stats(): RenderStats {
     const info = this.renderer.info as unknown as { render: { drawCalls: number } };
     return { backend: this.kind, drawCalls: info.render.drawCalls, glyphs: this.lastStats.glyphs, textures: this.textures.size };
+  }
+
+  async idle() {
+    const device = (this.renderer.backend as { device?: { queue: { onSubmittedWorkDone(): Promise<void> } } }).device;
+    await device?.queue.onSubmittedWorkDone();
   }
 
   dispose() {

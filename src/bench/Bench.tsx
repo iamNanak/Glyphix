@@ -50,12 +50,12 @@ export default function Bench() {
   const vram = estimateVramMB(doc, 1920 * 1080);
 
   return (
-    <div className="grid h-full grid-cols-[1fr_340px] bg-surface text-sm">
+    <div className="grid h-full grid-cols-[1fr_340px] bg-app text-sm">
       <main className="relative min-h-0">
         <Viewport doc={doc} time={time} forceWebGL={forceWebGL} continuous onFrame={onFrame} onStats={setStats} />
       </main>
       <aside className="space-y-5 overflow-y-auto border-l border-line bg-panel p-4" aria-label="Benchmark controls">
-        <a href="#/" className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-white">
+        <a href="#/" className="inline-flex items-center gap-1.5 text-xs text-dim hover:text-white">
           <ArrowLeft size={14} /> Back to editor
         </a>
         <h1 className="text-lg font-semibold">Bench</h1>
@@ -67,7 +67,7 @@ export default function Bench() {
             </Button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-xs text-muted">
+        <label className="flex items-center gap-2 text-xs text-dim">
           <input type="checkbox" checked={forceWebGL} onChange={(e) => setForceWebGL(e.target.checked)} /> Force WebGL2
         </label>
 
@@ -83,10 +83,10 @@ export default function Bench() {
           <Stat k="textures" v={String(stats?.textures ?? 0)} />
           <Stat k="VRAM est." v={`${vram.toFixed(0)} MB`} />
         </dl>
-        <p className="text-xs text-muted">Frame time is the rAF interval while rendering continuously (display-capped). CPU is evaluate + render submit.</p>
+        <p className="text-xs text-dim">Frame time is the rAF interval while rendering continuously (display-capped). CPU is evaluate + render submit.</p>
 
         <div className="space-y-2">
-          <h2 className="text-[11px] font-semibold tracking-wider text-muted uppercase">Gates</h2>
+          <h2 className="text-[11px] font-semibold tracking-wider text-dim uppercase">Gates</h2>
           <Button className="w-full" disabled={busy} onClick={() => run('Determinism', () => determinismCheck(doc, forceWebGL))}>
             Preview = export pixel check
           </Button>
@@ -119,7 +119,7 @@ export default function Bench() {
 function Stat({ k, v, good }: { k: string; v: string; good?: boolean }) {
   return (
     <>
-      <dt className="text-muted">{k}</dt>
+      <dt className="text-dim">{k}</dt>
       <dd className={good === undefined ? '' : good ? 'text-emerald-400' : 'text-amber-400'}>{v}</dd>
     </>
   );
@@ -132,6 +132,13 @@ async function pixels(bmp: ImageBitmap): Promise<Uint8ClampedArray> {
   const g = c.getContext('2d', { willReadFrequently: true })!;
   g.drawImage(bmp, 0, 0);
   return g.getImageData(0, 0, bmp.width, bmp.height).data;
+}
+
+/** Share of pixels that are mostly opaque: guards against "two blank frames match". */
+function opaqueShare(px: Uint8ClampedArray): number {
+  let n = 0;
+  for (let i = 3; i < px.length; i += 4) if (px[i]! > 200) n++;
+  return n / (px.length / 4);
 }
 
 function diff(a: Uint8ClampedArray, b: Uint8ClampedArray) {
@@ -154,6 +161,7 @@ async function renderWith(doc: Doc, t: number, forceWebGL: boolean): Promise<Uin
     b.render(evaluate(doc, t)); // warm-up (layout → atlas)
     return await pixels(await renderFrameBitmap(b, doc, t));
   } finally {
+    await b.idle().catch(() => {});
     b.dispose();
   }
 }
@@ -163,7 +171,9 @@ async function determinismCheck(doc: Doc, forceWebGL: boolean): Promise<string> 
   const t = 1.234;
   const [a, b] = [await renderWith(doc, t, forceWebGL), await renderWith(doc, t, forceWebGL)];
   const d = diff(a, b);
-  return `max Δ ${d.max}, ${d.pctOver1.toFixed(3)}% > 1 LSB → ${d.max <= 1 ? 'PASS' : 'FAIL'}`;
+  const filled = opaqueShare(a);
+  if (filled < 0.5) return `FAIL — rendered frame is ${(filled * 100).toFixed(0)}% opaque (blank readback?)`;
+  return `max Δ ${d.max}, ${d.pctOver1.toFixed(3)}% > 1 LSB, ${(filled * 100).toFixed(0)}% opaque → ${d.max <= 1 ? 'PASS' : 'FAIL'}`;
 }
 
 async function backendDiff(doc: Doc): Promise<string> {

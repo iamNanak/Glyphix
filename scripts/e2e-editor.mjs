@@ -1,19 +1,19 @@
 // Drives the editor like a user: select, move (with snapping), scale, rotate, crop, text edit,
 // zoom, layer ops, undo/redo. Asserts on the document via window.__glyphix (dev only).
 // Usage: HEADED=1 node scripts/e2e-editor.mjs [baseUrl] [outDir]
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5173';
 const out = process.argv[3] ?? '.';
-const browser = await chromium.launch({
-  headless: !process.env.HEADED,
-  executablePath: process.env.CHROME ?? '/usr/bin/google-chrome',
-  args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
-});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+page.on('console', (m) => {
+  if (m.type() === 'error') errors.push(m.text());
+  // TRACE=1 interleaves errors (and any [dbg] logs) with the checks below.
+  if (process.env.TRACE && (m.type() === 'error' || m.text().includes('[dbg]'))) console.log(`  · ${m.type()} ${m.text().slice(0, 100)}`);
+});
 
 let failures = 0;
 const check = (name, ok, detail = '') => {
@@ -152,5 +152,6 @@ await page.screenshot({ path: `${out}/e2e-zoomed.png` });
 await page.keyboard.press('Control+0');
 
 console.log(errors.length ? `page errors:\n${errors.slice(0, 10).join('\n')}` : 'no page errors');
+if (errors.length) failures++;
 await browser.close();
 process.exit(failures ? 1 : 0);

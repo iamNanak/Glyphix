@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { Layer } from '@/doc';
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Image, Lock, Square, Trash2, Type, Unlock } from 'lucide-react';
 import { useEditor } from './store';
 import { IconButton } from './ui';
@@ -6,7 +7,16 @@ import { IconButton } from './ui';
 const icons = { background: Square, image: Image, text: Type } as const;
 
 export function LayersPanel() {
-  const layers = useEditor((s) => s.doc.comp.layers);
+  // Re-render only when something the panel shows changes (not on every move/scale).
+  const signature = useEditor((s) => s.doc.comp.layers.map((l) => `${l.id}\u0001${l.type}\u0001${l.name}\u0001${+l.visible}\u0001${+l.locked}`).join('\u0002'));
+  const layers = useMemo(
+    () =>
+      signature.split('\u0002').map((row) => {
+        const [id, type, name, visible, locked] = row.split('\u0001') as [string, Layer['type'], string, string, string];
+        return { id, type, name, visible: visible === '1', locked: locked === '1' };
+      }),
+    [signature],
+  );
   const selectedId = useEditor((s) => s.selectedId);
   const s = useEditor.getState();
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -17,7 +27,7 @@ export function LayersPanel() {
 
   return (
     <aside className="flex min-h-0 flex-col border-r border-line bg-panel" aria-label="Layers">
-      <h2 className="px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-muted uppercase">Layers</h2>
+      <h2 className="px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-dim uppercase">Layers</h2>
       <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2" role="listbox" aria-label="Layer list">
         {layers
           .map((layer, index) => ({ layer, index }))
@@ -67,7 +77,7 @@ export function LayersPanel() {
                     onClick={() => s.select(layer.id)}
                     onDoubleClick={() => !fixed && setRenaming(layer.id)}
                   >
-                    <Icon size={14} className="shrink-0 text-muted" />
+                    <Icon size={14} className="shrink-0 text-dim" />
                     {renaming === layer.id ? (
                       <input
                         autoFocus
@@ -90,7 +100,7 @@ export function LayersPanel() {
                   <button
                     type="button"
                     aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
-                    className={`rounded p-1 text-muted hover:text-white ${layer.locked ? 'opacity-100' : 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100'}`}
+                    className={`rounded p-1 text-dim hover:text-white ${layer.locked ? 'opacity-100' : 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100'}`}
                     onClick={() => s.toggleLayer(layer.id, 'locked')}
                   >
                     {layer.locked ? <Lock size={13} /> : <Unlock size={13} />}
@@ -98,7 +108,7 @@ export function LayersPanel() {
                   <button
                     type="button"
                     aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
-                    className="rounded p-1 text-muted opacity-60 hover:text-white group-hover:opacity-100"
+                    className="rounded p-1 text-dim opacity-60 hover:text-white group-hover:opacity-100"
                     onClick={() => s.toggleLayer(layer.id, 'visible')}
                   >
                     {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}

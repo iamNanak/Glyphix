@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Editor } from './Editor';
+import { TooltipProvider } from '@/components/wensity/tooltip';
 import { assetStore } from '@/assets/assetStore';
 import { createDemoScreenshot } from '@/assets/demoScreenshot';
 import { DEMO_SCREENSHOT_ASSET } from '@/doc';
@@ -22,10 +23,14 @@ export function App() {
   const route = useHashRoute();
   if (route === '#/bench') {
     return (
-      <Suspense fallback={<div className="p-6 text-muted">Loading bench…</div>}>
+      <Suspense fallback={<div className="p-6 text-dim">Loading bench…</div>}>
         <Bench />
       </Suspense>
     );
   }
-  return <Editor />;
+  return (
+    <TooltipProvider delay={500}>
+      <Editor />
+    </TooltipProvider>
+  );
 }

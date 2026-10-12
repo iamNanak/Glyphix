@@ -1,15 +1,11 @@
 // Styling flows + the Milestone B gate: drop a 4K screenshot, style it, drag it at 60 fps, undo/redo.
 // Usage: HEADED=1 node scripts/e2e-styling.mjs [baseUrl] [outDir]
 import os from 'node:os';
-import { chromium } from 'playwright-core';
+import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5173';
 const out = process.argv[3] ?? '.';
-const browser = await chromium.launch({
-  headless: !process.env.HEADED,
-  executablePath: process.env.CHROME ?? '/usr/bin/google-chrome',
-  args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'],
-});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -66,7 +62,7 @@ check('4K drop adds a selected image layer', added.type === 'image' && s1.select
 // --- Style it via the inspector.
 await page.getByRole('button', { name: 'Browser', exact: true }).click();
 await page.getByLabel('Address').fill('acme.app/dashboard');
-await page.getByRole('radio', { name: 'Float' }).click();
+await page.getByRole('button', { name: 'Float', exact: true }).click();
 await page.getByRole('button', { name: 'Hero', exact: true }).click();
 const padding = page.getByLabel('Padding');
 await padding.focus();
@@ -78,7 +74,7 @@ check('padding fits the card', Math.abs((1920 - card) / 2 - 160) < 2 || Math.abs
 
 // Background from screenshot palette (select nothing → canvas/background inspector).
 await page.keyboard.press('Escape');
-await page.getByRole('radio', { name: 'Mesh' }).click();
+await page.getByRole('button', { name: 'Mesh', exact: true }).click();
 let bg = (await state()).doc.comp.layers[0];
 check('mesh background', bg.fill.kind === 'mesh');
 await page.getByRole('button', { name: /Apply .* background 1$/ }).first().click();
@@ -145,13 +141,22 @@ check('undo step < 50 ms', undoMs < 50, `${undoMs.toFixed(2)} ms/step`);
 
 // --- Export still matches: PNG export with frame + tilt shouldn't throw.
 await page.keyboard.press('Control+Shift+z');
-const exportOk = await page.evaluate(async () => {
+const png = await page.evaluate(async () => {
   const { exportPng } = await import('/src/export/exporter.ts');
   const blob = await exportPng(window.__glyphix.state().doc, 4, {});
-  return blob.size;
+  const bmp = await createImageBitmap(blob);
+  const c = new OffscreenCanvas(bmp.width, bmp.height);
+  const g = c.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+  let opaque = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 200) opaque++;
+  return { kb: blob.size / 1024, opaquePct: (100 * opaque) / (d.length / 4) };
 });
-check('PNG export with styling', exportOk > 10000, `${(exportOk / 1024).toFixed(0)} KB`);
+// The background covers the whole comp, so a correct export is fully opaque (a blank one is 0%).
+check('PNG export with styling', png.opaquePct > 99, `${png.kb.toFixed(0)} KB, ${png.opaquePct.toFixed(1)}% opaque`);
 
 console.log(errors.length ? `page errors:\n${errors.slice(0, 10).join('\n')}` : 'no page errors');
+if (errors.length) failures++;
 await browser.close();
 process.exit(failures ? 1 : 0);

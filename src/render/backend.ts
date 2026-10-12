@@ -28,6 +28,8 @@ export interface RenderBackend {
   stats(): RenderStats;
   /** Called when the GPU device/context is lost and the backend is unusable. */
   onLost: ((reason: string) => void) | null;
+  /** Resolves when the GPU has finished all submitted work (call before dispose()). */
+  idle(): Promise<void>;
   dispose(): void;
 }
 
