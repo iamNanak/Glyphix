@@ -19,12 +19,13 @@ const THUMB_EVERY_MS = 30_000;
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let lastSaved: Doc | null = null;
-let lastThumbAt = 0;
+/** When each project's thumbnail was last rendered (per project, so switching gets a fresh one). */
+const lastThumbAt = new Map<string, number>();
 let inFlight: Promise<void> = Promise.resolve();
 
-async function thumbnail(doc: Doc): Promise<Blob | undefined> {
-  if (Date.now() - lastThumbAt < THUMB_EVERY_MS) return undefined;
-  lastThumbAt = Date.now();
+async function thumbnail(doc: Doc, force = false): Promise<Blob | undefined> {
+  if (!force && Date.now() - (lastThumbAt.get(doc.id) ?? 0) < THUMB_EVERY_MS) return undefined;
+  lastThumbAt.set(doc.id, Date.now());
   try {
     // A late frame, after entrance animations have played.
     return await exportPng(doc, Math.max(0, doc.comp.duration - 0.05), { scale: 360 / doc.comp.width });
@@ -78,9 +79,17 @@ export function startAutosave(): () => void {
 }
 
 /** Mark a freshly loaded doc as saved so loading doesn't immediately re-save it. */
+/** Render and store a thumbnail now (e.g. for a project that was just created or opened). */
+export function refreshThumbnail(doc: Doc): Promise<void> {
+  inFlight = inFlight.then(async () => {
+    const thumb = await thumbnail(doc, true);
+    if (thumb) await saveProject(doc, thumb);
+  });
+  return inFlight;
+}
+
 export function markSaved(doc: Doc) {
   lastSaved = doc;
-  lastThumbAt = 0;
   useSaveStatus.setState({ state: 'saved', savedAt: Date.now(), error: null });
 }
 

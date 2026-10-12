@@ -1,6 +1,6 @@
 import { Easings } from './easing';
 import { NO_MOTION } from './motion';
-import { FULL_CROP, NO_FRAME, NO_TILT, SCHEMA_VERSION, type Doc } from './types';
+import { FULL_CROP, NO_FRAME, NO_TILT, SCHEMA_VERSION, type Doc, type TextLayer } from './types';
 
 export const DEMO_SCREENSHOT_ASSET = 'demo-screenshot';
 
@@ -83,6 +83,30 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
             easing: Easings.easeOutBack,
             from: { offsetX: 0, offsetY: 60, scale: 0.4, rotation: -12, opacity: 0 },
           },
+        },
+      ],
+    },
+  };
+}
+
+/** A fresh project: gradient background and a headline that rises in. */
+export function createBlankDoc(id: string): Doc {
+  const demo = createDemoDoc('Your headline');
+  const [bg, , headline] = demo.comp.layers as [Doc['comp']['layers'][number], unknown, TextLayer];
+  return {
+    ...demo,
+    id,
+    name: 'Untitled',
+    comp: {
+      ...demo.comp,
+      layers: [
+        bg,
+        {
+          ...headline,
+          animator: null,
+          glow: { static: 0.3 },
+          transform: { ...headline.transform, y: { static: 540 } },
+          motion: { enter: { preset: 'rise', start: 0.2, duration: 1, easing: Easings.easeOutBack }, loop: null },
         },
       ],
     },

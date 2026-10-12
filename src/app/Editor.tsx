@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Check, CloudOff, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2, X } from 'lucide-react';
-import { useSaveStatus } from '@/persistence/autosave';
+import { Activity, Check, CloudOff, FolderOpen, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2, X } from 'lucide-react';
+import { flushSave, useSaveStatus } from '@/persistence/autosave';
+import { openProjectFile, saveProjectFile } from '@/persistence/actions';
+import { PROJECT_EXTENSION } from '@/persistence/projectFile';
+import { ProjectsDialog, useOpenFilePicker } from './ProjectsDialog';
 import { useEditor } from './store';
 import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
@@ -23,10 +26,14 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
   usePlaybackClock();
   useShortcuts();
   usePasteImage(setError);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const pickFile = useOpenFilePicker(setError);
+  useProjectShortcuts(pickFile, setError);
 
   return (
     <div className="grid h-full grid-rows-[48px_1fr_88px] bg-app text-sm">
-      <Toolbar backend={backend} />
+      <Toolbar backend={backend} onProjects={() => setProjectsOpen(true)} />
+      <ProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} onError={setError} pickFile={pickFile} />
       <div className="grid min-h-0 grid-cols-[220px_1fr_288px]">
         <LayersPanel />
         <main className="relative min-h-0 min-w-0 bg-[radial-gradient(circle_at_center,#16161f_0,#0b0b0f_70%)]">
@@ -100,7 +107,7 @@ function ProjectTitle() {
   );
 }
 
-function Toolbar({ backend }: { backend: string }) {
+function Toolbar({ backend, onProjects }: { backend: string; onProjects: () => void }) {
   const canUndo = useEditor((s) => s.canUndo);
   const canRedo = useEditor((s) => s.canRedo);
   const forceWebGL = useEditor((s) => s.forceWebGL);
@@ -144,6 +151,9 @@ function Toolbar({ backend }: { backend: string }) {
       <span className="mr-3 text-[15px] font-semibold tracking-tight">
         Glyph<span className="text-accent">ix</span>
       </span>
+      <IconButton label="Projects" onClick={onProjects}>
+        <FolderOpen size={16} />
+      </IconButton>
       <ProjectTitle />
       <IconButton label="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
         <Undo2 size={16} />
@@ -329,6 +339,25 @@ function useShortcuts() {
   }, []);
 }
 
+function useProjectShortcuts(pickFile: () => void, onError: (msg: string | null) => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'o') {
+        e.preventDefault();
+        pickFile();
+      } else if (key === 's') {
+        e.preventDefault(); // never the browser's "save page"
+        const done = e.shiftKey ? saveProjectFile() : flushSave();
+        done.catch((err: unknown) => onError(err instanceof Error ? err.message : String(err)));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pickFile, onError]);
+}
+
 function ZoomControls() {
   const zoom = useView((s) => s.view.zoom);
   const { fit, zoomAt, host } = useView.getState();
@@ -392,7 +421,17 @@ function usePasteImage(onError: (msg: string | null) => void) {
     };
     const onDragOver = (e: DragEvent) => e.preventDefault();
     const onDrop = (e: DragEvent) => {
-      const file = [...(e.dataTransfer?.files ?? [])].find((f) => f.type.startsWith('image/'));
+      const files = [...(e.dataTransfer?.files ?? [])];
+      const project = files.find((f) => f.name.toLowerCase().endsWith(PROJECT_EXTENSION));
+      if (project) {
+        e.preventDefault();
+        openProjectFile(project).then(
+          () => onError(null),
+          (err: unknown) => onError(err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+      const file = files.find((f) => f.type.startsWith('image/'));
       if (file) {
         e.preventDefault();
         void place(file);
