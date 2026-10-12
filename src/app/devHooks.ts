@@ -4,6 +4,8 @@ import { useView } from '@/editor/viewStore';
 import { layerBox } from '@/editor/geometry';
 import { measureText } from '@/editor/Overlay';
 import { frameBarHeight } from '@/styling/frames';
+import { assetStore } from '@/assets/assetStore';
+import { useSaveStatus } from '@/persistence/autosave';
 
 declare global {
   interface Window {
@@ -17,6 +19,9 @@ window.__glyphix = {
     return { doc: s.doc, selectedId: s.selectedId, cropId: s.cropId, editingTextId: s.editingTextId, time: s.time };
   },
   view: () => useView.getState().view,
+  /** Asset ids currently decoded in memory. */
+  assets: () => assetStore.ids(),
+  saveState: () => useSaveStatus.getState().state,
   /** Raw store access for experiments (dev only). */
   editor: useEditor,
   setTime: (t: number) => useEditor.getState().setTime(t),

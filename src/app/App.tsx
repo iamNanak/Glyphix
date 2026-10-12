@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Editor } from './Editor';
+import { useEditor } from './store';
+import { bootProject, flushSave, startAutosave } from '@/persistence/autosave';
 import { TooltipProvider } from '@/components/wensity/tooltip';
 import { assetStore } from '@/assets/assetStore';
 import { createDemoScreenshot } from '@/assets/demoScreenshot';
@@ -30,7 +32,35 @@ export function App() {
   }
   return (
     <TooltipProvider delay={500}>
-      <Editor />
+      <EditorBoot />
     </TooltipProvider>
   );
+}
+
+/** Restore the last project (or start a new one) before showing the editor, then autosave. */
+function EditorBoot() {
+  const [boot, setBoot] = useState<{ ready: boolean; warning: string | null }>({ ready: false, warning: null });
+  useEffect(() => {
+    let stop = () => {};
+    let cancelled = false;
+    void bootProject().then(({ doc, warning }) => {
+      if (cancelled) return;
+      useEditor.getState().loadDoc(doc);
+      stop = startAutosave();
+      void flushSave(); // first save of a brand-new project; no-op for a restored one
+      setBoot({ ready: true, warning });
+    });
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, []);
+  if (!boot.ready) {
+    return (
+      <div className="grid h-full place-items-center bg-app text-sm text-dim" role="status">
+        Opening your project…
+      </div>
+    );
+  }
+  return <Editor initialWarning={boot.warning} />;
 }

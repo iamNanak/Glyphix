@@ -37,6 +37,10 @@ class AssetStore {
     return this.assets.has(id);
   }
 
+  ids(): string[] {
+    return [...this.assets.keys()];
+  }
+
   put(id: string, source: AssetSource, opts: { levels?: AssetLevel[]; blob?: Blob } = {}): Asset {
     const prev = this.assets.get(id);
     const full = { source, width: source.width, height: source.height };
@@ -121,4 +125,26 @@ export async function importImage(blob: Blob): Promise<ImportedImage> {
   const levels = await makeProxies(full);
   assetStore.put(id, full, { levels, blob });
   return { id, width: full.width, height: full.height, reused: false };
+}
+
+/** Load a stored file back under its original asset id (projects reference assets by id). */
+export async function loadAssetBlob(id: string, blob: Blob): Promise<Asset> {
+  const existing = assetStore.get(id);
+  if (existing) return existing;
+  const full = await decodeImage(blob);
+  const levels = await makeProxies(full);
+  return assetStore.put(id, full, { levels, blob });
+}
+
+/** The asset as an encoded file. Canvas-only assets (e.g. the procedural demo) are encoded to PNG once. */
+export async function assetBlob(id: string): Promise<Blob | null> {
+  const asset = assetStore.get(id);
+  if (!asset) return null;
+  if (asset.blob) return asset.blob;
+  const src = asset.levels[0]!.source;
+  const canvas = new OffscreenCanvas(asset.width, asset.height);
+  canvas.getContext('2d')!.drawImage(src as CanvasImageSource, 0, 0);
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  asset.blob = blob; // cache: don't re-encode on every save
+  return blob;
 }

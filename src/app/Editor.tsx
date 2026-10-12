@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2, X } from 'lucide-react';
+import { Activity, Check, CloudOff, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2, X } from 'lucide-react';
+import { useSaveStatus } from '@/persistence/autosave';
 import { useEditor } from './store';
 import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
@@ -16,9 +17,9 @@ import { layerIndex } from './store';
 
 // Subscriptions are kept as low in the tree as possible: during a drag only <Stage> (canvas +
 // overlay) re-renders; panels subscribe to the narrow slices they display.
-export function Editor() {
+export function Editor({ initialWarning = null }: { initialWarning?: string | null }) {
   const [backend, setBackend] = useState<string>('…');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialWarning);
   usePlaybackClock();
   useShortcuts();
   usePasteImage(setError);
@@ -73,6 +74,32 @@ function Stage({ onBackend, onError }: { onBackend: (kind: string) => void; onEr
   );
 }
 
+function ProjectTitle() {
+  const name = useEditor((s) => s.doc.name);
+  const save = useSaveStatus();
+  const label =
+    save.state === 'saving' ? 'Saving…' : save.state === 'error' ? 'Not saved' : save.state === 'saved' ? 'Saved' : '';
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <input
+        aria-label="Project name"
+        className="w-44 min-w-0 truncate rounded-md bg-transparent px-2 py-1 text-sm text-zinc-200 outline-none hover:bg-white/5 focus:bg-panel-2 focus:ring-1 focus:ring-accent"
+        value={name}
+        onChange={(e) => useEditor.getState().set('Rename project', [{ path: ['name'], value: e.target.value }], 'project-name')}
+        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      />
+      <span
+        role="status"
+        title={save.error ?? undefined}
+        className={`flex items-center gap-1 text-xs ${save.state === 'error' ? 'text-red-300' : 'text-dim'}`}
+      >
+        {save.state === 'error' ? <CloudOff size={13} /> : save.state === 'saved' ? <Check size={13} /> : null}
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function Toolbar({ backend }: { backend: string }) {
   const canUndo = useEditor((s) => s.canUndo);
   const canRedo = useEditor((s) => s.canRedo);
@@ -117,6 +144,7 @@ function Toolbar({ backend }: { backend: string }) {
       <span className="mr-3 text-[15px] font-semibold tracking-tight">
         Glyph<span className="text-accent">ix</span>
       </span>
+      <ProjectTitle />
       <IconButton label="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
         <Undo2 size={16} />
       </IconButton>
