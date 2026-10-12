@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Check, CloudOff, FolderOpen, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2, X } from 'lucide-react';
+import { Activity, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2 } from 'lucide-react';
 import { flushSave, useSaveStatus } from '@/persistence/autosave';
 import { openProjectFile, saveProjectFile } from '@/persistence/actions';
 import { PROJECT_EXTENSION } from '@/persistence/projectFile';
 import { ProjectsDialog, useOpenFilePicker } from './ProjectsDialog';
+import { ExportDialog } from './ExportDialog';
 import { useEditor } from './store';
 import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
@@ -11,7 +12,6 @@ import { Inspector } from './Inspector';
 import { Button, IconButton, inputClass, SelectField } from './ui';
 import { Slider } from '@/components/wensity/slider';
 import { Switch } from '@/components/wensity/switch';
-import { downloadBlob, exportPng, exportVideo } from '@/export/exporter';
 import { importImage } from '@/assets/assetStore';
 import { createImageLayer, fitSize, makeInsert, offsetProp } from '@/doc';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
@@ -27,12 +27,14 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
   useShortcuts();
   usePasteImage(setError);
   const [projectsOpen, setProjectsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const pickFile = useOpenFilePicker(setError);
-  useProjectShortcuts(pickFile, setError);
+  useProjectShortcuts(pickFile, setError, () => setExportOpen(true));
 
   return (
     <div className="grid h-full grid-rows-[48px_1fr_88px] bg-app text-sm">
-      <Toolbar backend={backend} onProjects={() => setProjectsOpen(true)} />
+      <Toolbar backend={backend} onProjects={() => setProjectsOpen(true)} onExport={() => setExportOpen(true)} />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <ProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} onError={setError} pickFile={pickFile} />
       <div className="grid min-h-0 grid-cols-[220px_1fr_288px]">
         <LayersPanel />
@@ -107,45 +109,11 @@ function ProjectTitle() {
   );
 }
 
-function Toolbar({ backend, onProjects }: { backend: string; onProjects: () => void }) {
+function Toolbar({ backend, onProjects, onExport }: { backend: string; onProjects: () => void; onExport: () => void }) {
   const canUndo = useEditor((s) => s.canUndo);
   const canRedo = useEditor((s) => s.canRedo);
   const forceWebGL = useEditor((s) => s.forceWebGL);
   const { undo, redo, setForceWebGL } = useEditor.getState();
-  const [progress, setProgress] = useState<number | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const onPng = async () => {
-    const { doc, time } = useEditor.getState();
-    setStatus('Rendering PNG…');
-    try {
-      const blob = await exportPng(doc, time, { forceWebGL });
-      downloadBlob(blob, `${doc.name}.png`);
-      setStatus(null);
-    } catch (e) {
-      setStatus(`PNG export failed: ${String(e)}`);
-    }
-  };
-
-  const onVideo = async () => {
-    const { doc } = useEditor.getState();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setProgress(0);
-    setStatus(null);
-    try {
-      const res = await exportVideo(doc, { forceWebGL, signal: ac.signal, onProgress: setProgress });
-      downloadBlob(res.blob, `${doc.name}.${res.extension.replace(/^\./, '')}`);
-      setStatus(`Exported ${res.codec.toUpperCase()} in ${(res.ms / 1000).toFixed(1)} s`);
-    } catch (e) {
-      setStatus((e as Error).name === 'AbortError' ? 'Export cancelled' : `Video export failed: ${String(e)}`);
-    } finally {
-      setProgress(null);
-      abortRef.current = null;
-    }
-  };
-
   return (
     <header className="flex items-center gap-2 border-b border-line bg-panel px-3">
       <span className="mr-3 text-[15px] font-semibold tracking-tight">
@@ -163,7 +131,6 @@ function Toolbar({ backend, onProjects }: { backend: string; onProjects: () => v
       </IconButton>
 
       <div className="ml-auto flex items-center gap-2">
-        {status && <span className="text-xs text-dim" role="status">{status}</span>}
         <div className="flex items-center gap-2 rounded-md px-2 py-1 ring-1 ring-line">
           <Switch
             switchSize="sm"
@@ -177,18 +144,9 @@ function Toolbar({ backend, onProjects }: { backend: string; onProjects: () => v
         <a href="#/bench" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-dim hover:text-white">
           <Activity size={14} /> Bench
         </a>
-        <Button onClick={onPng} disabled={progress !== null}>
-          <Download size={14} /> PNG
+        <Button variant="primary" onClick={onExport}>
+          <Download size={14} /> Export
         </Button>
-        {progress === null ? (
-          <Button variant="primary" onClick={onVideo}>
-            <Film size={14} /> Export video
-          </Button>
-        ) : (
-          <Button variant="primary" onClick={() => abortRef.current?.abort()} aria-label="Cancel export">
-            <X size={14} /> {Math.round(progress * 100)}%
-          </Button>
-        )}
       </div>
     </header>
   );
@@ -339,7 +297,7 @@ function useShortcuts() {
   }, []);
 }
 
-function useProjectShortcuts(pickFile: () => void, onError: (msg: string | null) => void) {
+function useProjectShortcuts(pickFile: () => void, onError: (msg: string | null) => void, openExport: () => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -347,6 +305,9 @@ function useProjectShortcuts(pickFile: () => void, onError: (msg: string | null)
       if (key === 'o') {
         e.preventDefault();
         pickFile();
+      } else if (key === 'e') {
+        e.preventDefault();
+        openExport();
       } else if (key === 's') {
         e.preventDefault(); // never the browser's "save page"
         const done = e.shiftKey ? saveProjectFile() : flushSave();
@@ -355,7 +316,7 @@ function useProjectShortcuts(pickFile: () => void, onError: (msg: string | null)
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [pickFile, onError]);
+  }, [pickFile, onError, openExport]);
 }
 
 function ZoomControls() {
