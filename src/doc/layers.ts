@@ -1,3 +1,4 @@
+import { NO_MOTION } from './motion';
 import { FULL_CROP, NO_FRAME, NO_TILT, type Comp, type ImageLayer } from './types';
 
 export function newLayerId(prefix: string): string {
@@ -27,6 +28,7 @@ export function createImageLayer(comp: Comp, assetId: string, srcW: number, srcH
     border: null,
     frame: NO_FRAME,
     tilt: NO_TILT,
+    motion: NO_MOTION,
     opacity: { static: 1 },
     transform: { x: { static: comp.width / 2 }, y: { static: comp.height / 2 }, scale: { static: 1 }, rotation: { static: 0 } },
   };

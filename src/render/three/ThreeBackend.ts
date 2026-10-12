@@ -340,6 +340,9 @@ class TextNode implements LayerNode {
     u.glow.value = item.glow;
     setColor(u.glowColor.value, item.glowColor);
     u.glowAlpha.value = item.glowColor[3] * item.opacity;
+    u.waveAmp.value = item.wave?.amplitude ?? 0;
+    u.wavePeriod.value = item.wave?.period ?? 1;
+    u.waveSpread.value = item.wave?.spread ?? 0;
 
     if (anim) {
       u.start.value = anim.start;
@@ -373,12 +376,14 @@ class TextNode implements LayerNode {
     const quad = new Float32Array(n * 4);
     const uvs = new Float32Array(n * 4);
     const rank = new Float32Array(n);
+    const index = new Float32Array(n);
     const size = fontLibrary.atlasSize;
     drawn.forEach((g, i) => {
       const a = g.glyph!;
       quad.set([g.x + a.l, g.y + a.b, g.x + a.r, g.y + a.t], i * 4);
       uvs.set([a.ax / size, a.ay / size, a.aw / size, a.ah / size], i * 4);
       rank[i] = ranks[i]!;
+      index[i] = i;
     });
 
     if (this.mesh) {
@@ -392,6 +397,7 @@ class TextNode implements LayerNode {
     geom.setAttribute('aQuad', new THREE.InstancedBufferAttribute(quad, 4));
     geom.setAttribute('aUV', new THREE.InstancedBufferAttribute(uvs, 4));
     geom.setAttribute('aRank', new THREE.InstancedBufferAttribute(rank, 1));
+    geom.setAttribute('aIndex', new THREE.InstancedBufferAttribute(index, 1));
     geom.instanceCount = n;
     const mesh = new THREE.Mesh(geom, this.m!.mat);
     mesh.frustumCulled = false;

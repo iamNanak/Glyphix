@@ -1,6 +1,7 @@
 import { ease } from './easing';
 import { seededPermutation } from './random';
 import { frameBarHeight } from './frame';
+import { glyphAnimatorFor, motionModifiers, waveFor, type Modifiers, type Wave } from './motion';
 import type {
   Color,
   CropRect,
@@ -65,6 +66,8 @@ export interface TextItem extends ResolvedTransform {
   glowColor: Color;
   /** Static animator template; per-glyph expansion happens in the renderer (GPU). */
   animator: GlyphAnimator | null;
+  /** Continuous per-glyph wave (GPU), or null. */
+  wave: Wave | null;
 }
 
 export type RenderItem = BackgroundItem | ImageItem | TextItem;
@@ -96,6 +99,10 @@ export function sampleProp<V extends number>(prop: Prop<V>, t: number): number {
   return keys[keys.length - 1]!.v;
 }
 
+function applyModifiers(tr: ResolvedTransform, m: Modifiers): ResolvedTransform {
+  return { x: tr.x + m.dx, y: tr.y + m.dy, scale: tr.scale * m.scale, rotation: tr.rotation + m.rotation };
+}
+
 function resolveTransform(tr: Transform, t: number): ResolvedTransform {
   return {
     x: sampleProp(tr.x, t),
@@ -115,7 +122,9 @@ export function evaluate(doc: Doc, t: number): RenderList {
       case 'background':
         items.push({ kind: 'background', id: layer.id, opacity, fill: layer.fill });
         break;
-      case 'image':
+      case 'image': {
+        const m = motionModifiers(layer.motion, t, doc.comp, 'image');
+        const tr = applyModifiers(resolveTransform(layer.transform, t), m);
         items.push({
           kind: 'image',
           id: layer.id,
@@ -123,17 +132,24 @@ export function evaluate(doc: Doc, t: number): RenderList {
           crop: layer.crop,
           width: layer.width,
           height: layer.height,
-          opacity,
+          opacity: opacity * m.opacity,
           radius: layer.radius,
           shadow: layer.shadow,
           border: layer.border,
           frame: layer.frame,
           frameBar: frameBarHeight(layer),
-          tilt: { rotateX: sampleProp(layer.tilt.rotateX, t), rotateY: sampleProp(layer.tilt.rotateY, t), perspective: layer.tilt.perspective },
-          ...resolveTransform(layer.transform, t),
+          tilt: {
+            rotateX: sampleProp(layer.tilt.rotateX, t) + m.tiltX,
+            rotateY: sampleProp(layer.tilt.rotateY, t) + m.tiltY,
+            perspective: layer.tilt.perspective,
+          },
+          ...tr,
         });
         break;
-      case 'text':
+      }
+      case 'text': {
+        const m = motionModifiers(layer.motion, t, doc.comp, 'text');
+        const enter = layer.motion.enter;
         items.push({
           kind: 'text',
           id: layer.id,
@@ -143,13 +159,15 @@ export function evaluate(doc: Doc, t: number): RenderList {
           color: layer.color,
           align: layer.align,
           tracking: layer.tracking,
-          opacity,
+          opacity: opacity * m.opacity,
           glow: sampleProp(layer.glow, t),
           glowColor: layer.glowColor,
-          animator: layer.animator,
-          ...resolveTransform(layer.transform, t),
+          animator: (enter && glyphAnimatorFor(enter, layer.text)) ?? layer.animator,
+          wave: waveFor(layer.motion.loop, layer.fontSize),
+          ...applyModifiers(resolveTransform(layer.transform, t), m),
         });
         break;
+      }
     }
   }
   return { width: doc.comp.width, height: doc.comp.height, t, items };

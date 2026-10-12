@@ -1,7 +1,10 @@
 // Document model: Comp → Layers → (animated) properties.
 // Pure data. No renderer, DOM, or framework imports allowed in src/doc/.
 
-export const SCHEMA_VERSION = 1;
+import type { Motion } from './motion';
+
+/** Bump when the saved document shape changes, and add a migration in migrations.ts. */
+export const SCHEMA_VERSION = 2;
 
 export type Easing =
   | { kind: 'linear' }
@@ -120,6 +123,7 @@ export interface ImageLayer extends LayerBase {
   border: Border | null;
   frame: Frame;
   tilt: Tilt;
+  motion: Motion;
 }
 
 export const NO_FRAME: Frame = { kind: 'none', url: '' };
@@ -157,7 +161,9 @@ export interface TextLayer extends LayerBase {
   /** Extra space between glyphs, in em. */
   tracking: number;
   transform: Transform;
+  /** Advanced/legacy per-glyph animator; a glyph enter preset in `motion` takes precedence. */
   animator: GlyphAnimator | null;
+  motion: Motion;
   /** SDF glow strength 0..1 (animatable). */
   glow: Prop<number>;
   glowColor: Color;

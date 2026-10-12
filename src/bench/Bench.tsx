@@ -168,7 +168,8 @@ async function renderWith(doc: Doc, t: number, forceWebGL: boolean): Promise<Uin
 
 /** Two independent backends (as preview and export use) must agree on the same (doc, t). */
 async function determinismCheck(doc: Doc, forceWebGL: boolean): Promise<string> {
-  const t = 1.234;
+  // Mid-animation on purpose: layers are scaled/moving and edges land on fractional pixels.
+  const t = 0.537;
   const [a, b] = [await renderWith(doc, t, forceWebGL), await renderWith(doc, t, forceWebGL)];
   const d = diff(a, b);
   const filled = opaqueShare(a);

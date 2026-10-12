@@ -7,3 +7,5 @@ export * from './demo';
 export * from './layers';
 export * from './props';
 export * from './frame';
+export * from './motion';
+export * from './migrations';

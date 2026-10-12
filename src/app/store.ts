@@ -39,6 +39,7 @@ interface EditorState {
   loadDoc(doc: Doc): void;
   setTime(t: number): void;
   setPlaying(p: boolean): void;
+  setLoop(loop: boolean): void;
   setForceWebGL(v: boolean): void;
   select(id: string | null): void;
   setCrop(id: string | null): void;
@@ -98,6 +99,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   setTime: (time) => set({ time }),
   setPlaying: (playing) => set({ playing }),
+  setLoop: (loop) => set({ loop }),
   setForceWebGL: (forceWebGL) => set({ forceWebGL }),
   select: (selectedId) => set((s) => ({ selectedId, cropId: s.cropId === selectedId ? s.cropId : null, editingTextId: null })),
   setCrop: (cropId) => set({ cropId, selectedId: cropId ?? get().selectedId }),

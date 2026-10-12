@@ -168,12 +168,15 @@ export function createImageMaterial(map: THREE.Texture) {
     const p = uv().sub(0.5).mul(u.size);
     const d = sdRoundRect(p, u.size.mul(0.5), u.radius);
     const yTop = float(1).sub(uv().y).mul(u.size.y); // px from the top edge
-    const inBar = yTop.lessThan(u.bar);
+    // 1 inside the frame bar, 0 in the image. Both textures are sampled unconditionally and blended:
+    // sampling (implicit mip/derivatives) inside a divergent branch is undefined on GPUs and made the
+    // edge row flicker between renders whenever the layer was scaled.
+    const inBar = float(1).sub(step(u.bar, yTop));
     // Textures are uploaded with flipY=false on both backends: v=0 is the first (top) row.
     const st = vec2(uv().x, yTop.sub(u.bar).div(max(u.size.y.sub(u.bar), 1)));
     const img = u.map.sample(u.crop.xy.add(st.mul(u.crop.zw)));
     const barC = u.barMap.sample(vec2(uv().x, yTop.div(max(u.bar, 1))));
-    const c = select(inBar, barC, img);
+    const c = mix(img, barC, inBar);
     const outer = aaCoverage(d);
     const inner = aaCoverage(d.add(u.borderWidth));
     const borderAmt = outer.sub(inner).mul(u.borderColor.w).mul(step(0.001, u.borderWidth));
@@ -236,12 +239,17 @@ export function createGlyphMaterial(atlas: THREE.Texture) {
     glow: uniform(0),
     glowColor: uniform(new THREE.Vector3(1, 1, 1)),
     glowAlpha: uniform(1),
+    // Continuous wave loop: y += amp · sin(2π(t/period − index·spread)).
+    waveAmp: uniform(0),
+    wavePeriod: uniform(1),
+    waveSpread: uniform(0),
     atlas: texture(atlas),
   };
 
   const aQuad = attribute('aQuad', 'vec4'); // l, b, r, t in em (pen-relative, y-up)
   const aUV = attribute('aUV', 'vec4'); // x, y, w, h in atlas uv
   const aRank = attribute('aRank', 'float');
+  const aIndex = attribute('aIndex', 'float'); // visual order, for the wave phase
 
   const progress = clamp(u.t.sub(u.start).sub(u.stagger.mul(aRank)).div(max(u.duration, 1e-5)), 0, 1);
   const eased = Fn(() => {
@@ -270,7 +278,8 @@ export function createGlyphMaterial(atlas: THREE.Texture) {
     const scaled = local.mul(s);
     const rotated = vec2(scaled.x.mul(c).sub(scaled.y.mul(sn)), scaled.x.mul(sn).add(scaled.y.mul(c)));
     const offset = mix(u.fromOffset, vec2(0, 0), eased);
-    return vec3(center.add(rotated).add(offset), 0);
+    const wave = u.waveAmp.mul(sin(u.t.div(max(u.wavePeriod, 1e-3)).sub(aIndex.mul(u.waveSpread)).mul(Math.PI * 2)));
+    return vec3(center.add(rotated).add(offset).add(vec2(0, wave)), 0);
   })();
 
   const vAtlasUV = vec2(aUV.x.add(corner.x.mul(aUV.z)), aUV.y.add(float(1).sub(corner.y).mul(aUV.w))).toVarying('vAtlasUV');

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Undo2, X } from 'lucide-react';
+import { Activity, Download, Film, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2, X } from 'lucide-react';
 import { useEditor } from './store';
 import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
 import { Inspector } from './Inspector';
-import { Button, IconButton } from './ui';
+import { Button, IconButton, inputClass, SelectField } from './ui';
 import { Slider } from '@/components/wensity/slider';
 import { Switch } from '@/components/wensity/switch';
 import { downloadBlob, exportPng, exportVideo } from '@/export/exporter';
@@ -163,7 +163,8 @@ function Timeline() {
   const playing = useEditor((s) => s.playing);
   const duration = useEditor((s) => s.doc.comp.duration);
   const fps = useEditor((s) => s.doc.comp.fps);
-  const { setPlaying, setTime } = useEditor.getState();
+  const loop = useEditor((s) => s.loop);
+  const { setPlaying, setTime, setLoop, set } = useEditor.getState();
   const frame = Math.floor(time * fps);
   return (
     <footer className="flex items-center gap-4 border-t border-line bg-panel px-4">
@@ -188,10 +189,40 @@ function Timeline() {
           <span>
             {time.toFixed(2)}s · frame {frame}
           </span>
-          <span>
-            {duration.toFixed(1)}s @ {fps}fps
-          </span>
+          <span>{Math.round(duration * fps)} frames</span>
         </div>
+      </div>
+      <div className="flex items-end gap-2">
+        <label className="space-y-1">
+          <span className="block text-[11px] text-dim">Length</span>
+          <input
+            type="number"
+            aria-label="Video length in seconds"
+            className={`${inputClass} w-20 py-1`}
+            min={0.5}
+            max={60}
+            step={0.5}
+            value={duration}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (v >= 0.5 && v <= 60) {
+                set('Video length', [{ path: ['comp', 'duration'], value: v }], 'comp-duration');
+                if (useEditor.getState().time > v) setTime(v);
+              }
+            }}
+          />
+        </label>
+        <div className="w-24">
+          <SelectField
+            label="Frame rate"
+            value={String(fps)}
+            options={[24, 30, 60].map((f) => ({ value: String(f), label: `${f} fps` }))}
+            onValueChange={(f) => set('Frame rate', [{ path: ['comp', 'fps'], value: Number(f) }])}
+          />
+        </div>
+        <IconButton label={loop ? 'Looping playback (on)' : 'Looping playback (off)'} active={loop} onClick={() => setLoop(!loop)} className="h-8">
+          <Repeat size={16} />
+        </IconButton>
       </div>
     </footer>
   );

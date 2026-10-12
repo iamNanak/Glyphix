@@ -1,4 +1,5 @@
 import { Easings } from './easing';
+import { NO_MOTION } from './motion';
 import { FULL_CROP, NO_FRAME, NO_TILT, SCHEMA_VERSION, type Doc } from './types';
 
 export const DEMO_SCREENSHOT_ASSET = 'demo-screenshot';
@@ -47,6 +48,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           border: null,
           frame: NO_FRAME,
           tilt: NO_TILT,
+          motion: NO_MOTION,
           opacity: { track: { keys: [{ t: 0, v: 0, out: Easings.easeOutCubic }, { t: 0.8, v: 1, out: Easings.linear }] } },
           transform: {
             x: { static: 960 },
@@ -71,6 +73,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           glow: { track: { keys: [{ t: 0.4, v: 0, out: Easings.easeOutCubic }, { t: 1.6, v: 0.8, out: Easings.easeInOutCubic }, { t: 3, v: 0.25, out: Easings.linear }] } },
           glowColor: [1, 0.85, 1, 1],
           transform: { x: { static: 960 }, y: { static: 150 }, scale: { static: 1 }, rotation: { static: 0 } },
+          motion: NO_MOTION,
           animator: {
             start: 0.3,
             duration: 0.7,

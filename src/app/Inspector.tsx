@@ -1,6 +1,8 @@
 import { useMemo, useRef } from 'react';
+import { AnimationSection } from './AnimationSection';
 import {
   Easings,
+  isGlyphPreset,
   NO_TILT,
   type BackgroundFill,
   type BackgroundLayer,
@@ -342,6 +344,7 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
             value={layer.tilt.perspective ?? NO_TILT.perspective}
             onValueChange={(v) => edit('Perspective', ['tilt', 'perspective'], v)} />
       </Section>
+      <AnimationSection layer={layer} edit={edit} />
     </>
   );
 }
@@ -349,7 +352,8 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
 // ---------------------------------------------------------------------------
 
 function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
-  const anim = layer.animator;
+  // The hand-tuned animator applies only when no per-glyph enter preset is chosen.
+  const anim = layer.motion.enter && isGlyphPreset(layer.motion.enter.preset) ? null : layer.animator;
   return (
     <>
       <Section title="Text">
@@ -375,7 +379,7 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
         </Field>
       </Section>
       {anim && (
-        <Section title="Glyph animation">
+        <Section title="Custom glyph animation">
           <SelectField
             label="Easing"
             value={easingName(anim.easing)}
@@ -396,6 +400,7 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
           <SliderField label="Seed" hint={String(anim.seed)} min={0} max={100} value={anim.seed} onValueChange={(v) => edit('Seed', ['animator', 'seed'], v)} />
         </Section>
       )}
+      <AnimationSection layer={layer} edit={edit} />
     </>
   );
 }

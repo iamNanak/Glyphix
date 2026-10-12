@@ -60,10 +60,10 @@ const added = s1.doc.comp.layers[3];
 check('4K drop adds a selected image layer', added.type === 'image' && s1.selectedId === added.id, `${added.name} ${Math.round(added.width)}×${Math.round(added.height)} in ${Date.now() - t0} ms (incl. PNG encode)`);
 
 // --- Style it via the inspector.
-await page.getByRole('button', { name: 'Browser', exact: true }).click();
+await page.getByRole('group', { name: 'Frame' }).getByRole('button', { name: 'Browser', exact: true }).click();
 await page.getByLabel('Address').fill('acme.app/dashboard');
-await page.getByRole('button', { name: 'Float', exact: true }).click();
-await page.getByRole('button', { name: 'Hero', exact: true }).click();
+await page.getByRole('group', { name: 'Shadow preset' }).getByRole('button', { name: 'Float', exact: true }).click();
+await page.getByRole('group', { name: 'Tilt preset' }).getByRole('button', { name: 'Hero', exact: true }).click();
 const padding = page.getByLabel('Padding');
 await padding.focus();
 await padding.fill('160');
@@ -84,7 +84,7 @@ await page.waitForTimeout(400);
 await page.screenshot({ path: `${out}/style-browser-hero.png` });
 
 // Canvas preset.
-await page.getByRole('button', { name: '1:1', exact: true }).click();
+await page.getByRole('group', { name: 'Canvas size' }).getByRole('button', { name: '1:1', exact: true }).click();
 check('canvas preset 1:1', (await state()).doc.comp.width === 1080);
 const sq = (await state()).doc.comp.layers[3];
 check('layout scaled to fit 1:1', sq.transform.scale.static < 0.6, `scale=${sq.transform.scale.static.toFixed(3)}`);
