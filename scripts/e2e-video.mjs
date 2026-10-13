@@ -84,13 +84,24 @@ async function previewFrame() {
   );
 }
 
+/** Poll the preview until it shows `want` (a seek decodes from the key frame: allow a few seconds under load). */
+async function waitFrame(want, timeout = 6000) {
+  const end = Date.now() + timeout;
+  let got = -1;
+  while (Date.now() < end) {
+    got = await previewFrame();
+    if (got === want) break;
+    await page.waitForTimeout(100);
+  }
+  return got;
+}
+
 // --- Paused / scrubbed: the exact frame (via the decoder), including backwards jumps.
 if (canvasReadable) {
   const shown = [];
   for (const f of [0, 45, 46, 120, 30, 149]) {
     await page.evaluate((t) => window.__glyphix.setTime(t), (f + 0.25) / 30);
-    await page.waitForTimeout(400);
-    shown.push([f, await previewFrame()]);
+    shown.push([f, await waitFrame(f)]);
   }
   check('paused preview shows the exact frame (incl. backwards seeks)', shown.every(([a, b]) => a === b), shown.map(([a, b]) => `${a}→${b}`).join(' '));
 } else console.log('SKIP paused preview frame check — headless Firefox canvas reads back blank');
@@ -98,16 +109,22 @@ if (canvasReadable) {
 // --- Playing: the live element follows the timeline.
 await page.evaluate(() => { window.__glyphix.setTime(0); window.__glyphix.editor.getState().setPlaying(true); });
 await page.waitForTimeout(800);
-await page.evaluate(() => window.__glyphixFrames.takeDrift());
+await page.evaluate(() => window.__glyphixFrames.takeStats());
 const t0 = (await state()).time;
 await page.waitForTimeout(2500);
-const drift = await page.evaluate(() => window.__glyphixFrames.takeDrift().sort((a, b) => a - b));
+const sync = await page.evaluate(() => {
+  const s = window.__glyphixFrames.takeStats();
+  const q = (a, p) => { const b = [...a].sort((x, y) => x - y); return b[Math.floor((b.length - 1) * p)] ?? Infinity; };
+  return { frames: s.frames, pic95: q(s.picture, 0.95), picMax: q(s.picture, 1), snd50: q(s.sound, 0.5), snd95: q(s.sound, 0.95), sndN: s.sound.length };
+});
 const t1 = (await state()).time;
 const playedFrame = canvasReadable ? await previewFrame() : null;
 await page.evaluate(() => window.__glyphix.editor.getState().setPlaying(false));
-const p95 = drift[Math.floor(drift.length * 0.95)] ?? Infinity;
-check('live playback presents frames', drift.length > 2.5 * 30 * 0.8, `${drift.length} frames in 2.5 s`);
-check('live playback in sync (p95 drift < 1 frame)', p95 < 1 / 30 + 0.001, `p50 ${(drift[drift.length >> 1] * 1000).toFixed(0)} ms, p95 ${(p95 * 1000).toFixed(0)} ms, timeline ${t0.toFixed(2)}→${t1.toFixed(2)} s`);
+const ms = (v) => `${(v * 1000).toFixed(0)} ms`;
+const expected = (t1 - t0) * 30;
+check('playback draws (nearly) every video frame', sync.frames >= expected * 0.9, `${sync.frames} frames for ${expected.toFixed(0)} expected, timeline ${t0.toFixed(2)}→${t1.toFixed(2)} s`);
+check('picture in sync with the timeline (late by < 1 frame)', sync.picMax < 1 / 30 + 0.002, `p95 ${ms(sync.pic95)}, max ${ms(sync.picMax)}`);
+check('sound follows the timeline (p95 < 80 ms)', sync.sndN > 10 && sync.snd95 < 0.08, `p50 ${ms(sync.snd50)}, p95 ${ms(sync.snd95)} over ${sync.sndN} samples`);
 if (canvasReadable) check('playing preview shows a moving frame', playedFrame > 30, `frame ${playedFrame}`);
 
 // --- Video section edits.
@@ -118,8 +135,7 @@ layer = await selected();
 check('trim start by keyboard', Math.abs(layer.video.in - 1) < 0.02, `in ${layer.video.in.toFixed(3)}`);
 if (canvasReadable) {
   await page.evaluate(() => window.__glyphix.setTime(0.01));
-  await page.waitForTimeout(400);
-  check('trimmed clip starts at the new in point', (await previewFrame()) === 30);
+  check('trimmed clip starts at the new in point', (await waitFrame(30)) === 30);
 }
 await page.getByRole('switch', { name: 'Loop' }).click();
 await page.getByRole('switch', { name: 'Mute' }).click();
@@ -153,11 +169,8 @@ const after = (await state()).doc.comp.layers.find((l) => l.id === id);
 check('video layer survives reload', JSON.stringify(after) === before);
 check('video file is back in memory', (await page.evaluate((a) => window.__glyphix.assets().includes(a), after.assetId)));
 if (canvasReadable) {
-  await page.keyboard.press('Space');
-  await page.keyboard.press('Space');
-  await page.evaluate(() => window.__glyphix.setTime(1 + 0.25 / 30));
-  await page.waitForTimeout(800);
-  check('after reload the preview shows the exact frame', (await previewFrame()) === 60);
+  await page.evaluate(() => { window.__glyphix.editor.getState().setPlaying(false); window.__glyphix.setTime(1 + 0.25 / 30); });
+  check('after reload the preview shows the exact frame', (await waitFrame(60, 10000)) === 60);
 }
 await page.screenshot({ path: `${out}/e2e-video.png` });
 

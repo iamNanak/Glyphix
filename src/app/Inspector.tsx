@@ -280,7 +280,8 @@ function Swatches({ fills, onPick }: { fills: BackgroundFill[]; onPick: (f: Back
           aria-label={`Apply ${f.kind} background ${i + 1}`}
           onClick={() => onPick(f)}
           className="aspect-video rounded-md ring-1 ring-line transition hover:ring-2 hover:ring-accent"
-          style={{ background: fillToCss(f), backgroundColor: f.kind === 'mesh' ? '#888' : undefined }}
+          // Mesh fills are translucent gradients: give them a grey base colour (last layer of the shorthand).
+          style={{ background: f.kind === 'mesh' ? `${fillToCss(f)}, #888` : fillToCss(f) }}
         />
       ))}
     </div>
