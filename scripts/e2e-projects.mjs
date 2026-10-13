@@ -59,7 +59,7 @@ check('save downloads a .glyphix file', download.suggestedFilename() === 'Launch
 
 // --- Profile B (empty storage): open the file.
 const b = await freshPage();
-const input = b.locator('input[type=file]');
+const input = b.locator('input[type=file][accept*="glyphix"]');
 await input.setInputFiles(path);
 await b.waitForFunction((id) => window.__glyphix.state().doc.id === id, launchDoc.id, { timeout: 15000 });
 const opened = await docOf(b);
@@ -71,7 +71,7 @@ await b.waitForFunction(() => window.__glyphix && document.querySelector('[aria-
 check('the opened project persists across reload', (await docOf(b)).id === launchDoc.id);
 
 // Opening the same file again makes a copy instead of overwriting.
-await b.locator('input[type=file]').setInputFiles(path);
+await b.locator('input[type=file][accept*="glyphix"]').setInputFiles(path);
 await b.waitForFunction((id) => window.__glyphix.state().doc.id !== id, launchDoc.id, { timeout: 15000 });
 check('opening it again opens a copy', (await docOf(b)).name === 'Launch visual (copy)');
 
@@ -87,7 +87,7 @@ check('deleting the open project switches to the remaining one', (await projects
 
 // A broken file shows a readable error instead of crashing.
 await b.keyboard.press('Escape');
-await b.locator('input[type=file]').setInputFiles({ name: 'broken.glyphix', mimeType: 'application/zip', buffer: Buffer.from('not a zip') });
+await b.locator('input[type=file][accept*="glyphix"]').setInputFiles({ name: 'broken.glyphix', mimeType: 'application/zip', buffer: Buffer.from('not a zip') });
 const alert = await b.getByRole('alert').textContent({ timeout: 5000 }).catch(() => '');
 check('a broken file shows a readable error', /couldn't be unzipped/.test(alert), alert);
 

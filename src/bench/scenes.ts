@@ -133,7 +133,52 @@ function asciiScene(): Doc {
   return doc;
 }
 
-export const SCENES: Record<string, { label: string; build: () => Doc }> = {
+// A 1080p30 H.264 test clip, encoded in the browser on first use (no file to ship): a moving gradient,
+// a sweeping bar and the frame number, so every frame differs.
+let benchVideoId: string | null = null;
+let benchVideoJob: Promise<string> | null = null;
+
+export function loadBenchVideo(): Promise<string> {
+  benchVideoJob ??= (async () => {
+    const { BufferTarget, CanvasSource, Mp4OutputFormat, Output, QUALITY_HIGH } = await import('mediabunny');
+    const { importVideo } = await import('@/video/videoAssets');
+    const canvas = new OffscreenCanvas(1920, 1080);
+    const g = canvas.getContext('2d')!;
+    const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
+    const source = new CanvasSource(canvas, { codec: 'avc', quality: QUALITY_HIGH, keyFrameInterval: 2 });
+    output.addVideoTrack(source, { frameRate: 30 });
+    await output.start();
+    for (let i = 0; i < 150; i++) {
+      const p = i / 150;
+      const grad = g.createLinearGradient(0, 0, 1920, 1080);
+      grad.addColorStop(0, `hsl(${p * 360}, 70%, 45%)`);
+      grad.addColorStop(1, `hsl(${p * 360 + 140}, 70%, 25%)`);
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 1920, 1080);
+      g.fillStyle = '#fff';
+      g.fillRect(p * 1920, 0, 80, 1080);
+      g.font = 'bold 280px sans-serif';
+      g.fillText(String(i).padStart(3, '0'), 700, 640);
+      await source.add(i / 30, 1 / 30);
+    }
+    await output.finalize();
+    const { id } = await importVideo(new Blob([(output.target as InstanceType<typeof BufferTarget>).buffer!], { type: 'video/mp4' }));
+    return (benchVideoId = id);
+  })();
+  return benchVideoJob;
+}
+
+/** The demo with its screenshot replaced by the 1080p30 test clip (looping), optionally under ASCII. */
+function videoScene(ascii: boolean): Doc {
+  const doc = createDemoDoc();
+  doc.name = ascii ? '1080p video + ASCII' : '1080p video';
+  const shot = doc.comp.layers.find((l) => l.id === 'shot') as ImageLayer;
+  if (benchVideoId) Object.assign(shot, { assetId: benchVideoId, video: { start: 0, in: 0, out: 5, loop: true, volume: 1, muted: true } });
+  if (ascii) shot.effects = [createEffect('ascii')];
+  return doc;
+}
+
+export const SCENES: Record<string, { label: string; build: () => Doc; video?: boolean }> = {
   demo: { label: 'Demo', build: () => createDemoDoc() },
   g300: { label: '300 glyphs', build: () => glyphScene(300) },
   g1000: { label: '1000 glyphs', build: () => glyphScene(1000) },
@@ -141,6 +186,8 @@ export const SCENES: Record<string, { label: string; build: () => Doc }> = {
   big: { label: '4K + 10 layers', build: bigScene },
   fx: { label: '4K layer + 3 effects', build: fxScene },
   ascii: { label: '1080p + ASCII 160×90', build: asciiScene },
+  video: { label: '1080p video', build: () => videoScene(false), video: true },
+  videoAscii: { label: '1080p video + ASCII', build: () => videoScene(true), video: true },
 };
 
 /** Rough VRAM estimate in MB: textures (with mips) + glyph atlas + drawing buffer. */

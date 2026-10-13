@@ -8,12 +8,19 @@ import { exportVideo, renderFrameBitmap } from '@/export/exporter';
 import { fontLibrary } from '@/text/fontLibrary';
 import { evaluate, type Doc } from '@/doc';
 import { frameStats } from './frameStats';
-import { estimateVramMB, SCENES } from './scenes';
+import { estimateVramMB, loadBenchVideo, SCENES } from './scenes';
 
 export default function Bench() {
   const [sceneId, setSceneId] = useState('g300');
   const [forceWebGL, setForceWebGL] = useState(new URLSearchParams(location.search).has('webgl'));
-  const doc = useMemo(() => SCENES[sceneId]!.build(), [sceneId]);
+  // Video scenes need the test clip, encoded on first use; the scene rebuilds once it's ready.
+  const [videoReady, setVideoReady] = useState(false);
+  const needsVideo = !!SCENES[sceneId]!.video && !videoReady;
+  useEffect(() => {
+    if (needsVideo) void loadBenchVideo().then(() => setVideoReady(true), (e: unknown) => log(`test video: FAILED — ${String(e)}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsVideo]);
+  const doc = useMemo(() => SCENES[sceneId]!.build(), [sceneId, videoReady]);
   const [time, setTime] = useState(0);
   const [stats, setStats] = useState<RenderStats | null>(null);
   const [summary, setSummary] = useState(frameStats.summary());
@@ -71,6 +78,7 @@ export default function Bench() {
           <input type="checkbox" checked={forceWebGL} onChange={(e) => setForceWebGL(e.target.checked)} /> Force WebGL2
         </label>
 
+        {needsVideo && <p role="status" className="text-xs text-dim">Preparing test video…</p>}
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-panel-2 p-3 font-mono text-xs ring-1 ring-line">
           <Stat k="backend" v={stats?.backend ?? '…'} />
           <Stat k="fps (p50)" v={fps.toFixed(0)} good={fps >= 58} />
