@@ -19,7 +19,7 @@ export interface PreviewFrames extends VideoFrameProvider {
 
 export function createPreviewFrames(): PreviewFrames {
   const exact = createExactFrames();
-  const lastDrawn = new Map<string, VideoFrame>();
+  const lastDrawn = new Map<string, number>();
   let playing = false;
   let stats: SyncStats = { picture: [], frames: 0 };
 
@@ -33,10 +33,11 @@ export function createPreviewFrames(): PreviewFrames {
     prepare: (list) => exact.prepare(list),
     frame(layerId, assetId, time): FrameImage | null {
       const f = exact.frame(layerId, assetId, time);
-      if (playing && f instanceof VideoFrame) {
-        if (lastDrawn.get(layerId) !== f) stats.frames++;
-        lastDrawn.set(layerId, f);
-        stats.picture.push(Math.max(0, time - (f.timestamp + (f.duration ?? 0)) / 1e6));
+      const span = f && playing ? exact.frameSpan(layerId) : null;
+      if (span) {
+        if (lastDrawn.get(layerId) !== span.start) stats.frames++;
+        lastDrawn.set(layerId, span.start);
+        stats.picture.push(Math.max(0, time - (span.start + span.duration)));
       }
       return f;
     },

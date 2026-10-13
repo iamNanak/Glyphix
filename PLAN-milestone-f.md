@@ -49,6 +49,34 @@ git worktree; the coordinator owns the shared interfaces and merges.
 | F4 | Export v2 (MP4 + audio mix, WebM VP9 alpha, PNG sequence, dialog) | agent C | decoded outputs: frame-exact video, audio present and in sync, alpha kept |
 | F5 | Live playback provider, video UI (import, inspector "Video" section, layer icon), integration, `e2e-video`, full runs | coordinator | all suites green on all three browsers; status below |
 
-## Status
+## Status (2026-10-14)
 
-In progress.
+F1–F5 done. Built by the coordinator plus three worker agents in separate git worktrees (A: video import +
+frame-exact decoder, B: ASCII, C: export v2), merged into `milestone-f`. Headless, Intel Iris Xe;
+Chrome WebGPU, Chrome forced WebGL2, Playwright Firefox.
+
+| Gate | Result |
+|---|---|
+| Import + persistence | MP4/WebM/MOV via toolbar, paste or drop; readable errors for non-videos, undecodable codecs, > 1 GB; reload and `.glyphix` round-trip keep the file byte-identical (e2e-video-assets, all browsers) |
+| Frame-exact | provider frames 0..149 (H.264) and 0..89 (VP9) exact; paused/scrubbed preview, backwards seeks, exported still, exported MP4 and WebM all read back the exact frame number (e2e-video, Chrome + Firefox) |
+| Plays in sync | preview pictures come from the exact decoder while playing: picture late p95 17–33 ms (< 1 frame) on Chrome WebGPU/WebGL2; sound (Web Audio, same mix as the export) drift p50 6 ms, p95 15–31 ms; cold start after a far jump in sync after ~120–150 ms |
+| ASCII 160×90 on 1080p | both passes ≈ 0.6–1.6 ms GPU (one full-screen pass); bench "1080p video + ASCII": 60 fps p50 on WebGPU and WebGL2; WebGPU = WebGL2 (mean Δ ≤ 0.06), preview = export Δ 0 |
+| Export v2 | MP4 + audio (mixed from every audible clip, placed/looped/faded, pitch and timing verified), WebM VP9 with alpha + Opus, PNG sequence zip; frame-exact; all browsers (e2e-export-v2) |
+| Earlier gates | all 13 e2e suites green on Chrome WebGPU, WebGL2 and Firefox; bench: every scene 60 fps p50, determinism Δ 0; Lighthouse a11y 100 / best practices 100; axe clean incl. the Video section; PWA offline |
+
+Found and fixed during integration:
+- Firefox WebGPU drew a VideoFrame texture as frame 0 forever → Firefox gets ImageBitmaps from the decoder.
+- A `<video>`/`<audio>` element per layer for preview sound stalled the frame decoder (prepare() 450–580 ms)
+  → preview sound plays the export's own audio mix through Web Audio; sync by construction.
+- First design (live `<video>` frames while playing) drifted 100–370 ms → pictures always from the exact decoder.
+
+Not verified / limits:
+- **AAC**: neither Chrome on Linux nor Firefox can encode AAC, so MP4 audio is Opus (with a note; QuickTime can't
+  play it). Fix needs the `@mediabunny/aac-encoder` dependency (MPL-2.0, 4.7 MB; matching version only 8 days old)
+  — waiting for a decision.
+- Headless Firefox renders the editor at ≤ 30 fps and falls behind during 1080p playback (pictures stay exact;
+  smoothness is reported, not gated, on Firefox). Real (headed) Firefox not checked.
+- The full editor plays at ~45 fps headless even without video (the bench page holds 60); this predates F.
+- Rotated videos are drawn upright but no rotated test file exists; Safari, other GPUs and screen readers not checked.
+- ASCII uses a fixed font (JetBrains Mono) and fixed charsets; no custom charset yet.
+- C8 (export in a Worker) still deferred: 5 s 1080p exports stay at ~5–9 s on the main thread.

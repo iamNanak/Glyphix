@@ -12,11 +12,19 @@ import { videoSource } from './videoAssets';
 import { FrameCursor, needsRestart, TIME_EPSILON } from './frameCursor';
 import type { VideoFrameProvider } from './provider';
 
+/**
+ * Firefox's WebGPU draws a VideoFrame texture as its first frame forever; there, frames are handed to the
+ * renderer as ImageBitmaps, converted here (off the render path) when each frame is decoded.
+ */
+const AS_BITMAP = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
+
 interface Slot {
   assetId: string;
   cursor: FrameCursor<VideoSample> | null;
-  /** What frame() returns: a copy of the cursor's current sample (survives session restarts). */
+  /** The cursor's current sample as a VideoFrame (survives session restarts). */
   frame: VideoFrame | null;
+  /** AS_BITMAP: `frame` as an ImageBitmap — what frame() returns there. */
+  bitmap: ImageBitmap | null;
   /** Last time requested and the time of the latest queued request (older queued ones are skipped). */
   lastTime: number;
   wanted: number;
@@ -29,6 +37,8 @@ interface Slot {
 export interface ExactFrames extends VideoFrameProvider {
   /** Debug counters: VideoFrames this provider holds open, decode sessions started, frames delivered. */
   stats(): { openFrames: number; sessions: number; frames: number };
+  /** Start and duration (s) of the frame held for a layer, or null. */
+  frameSpan(layerId: string): { start: number; duration: number } | null;
 }
 
 /** A VideoFrame for a sample, with rotation / flip metadata applied (display orientation). */
@@ -85,7 +95,20 @@ export function createExactFrames(): ExactFrames {
     try {
       const changed = await cursor.advance(t);
       if (disposed || slot.cursor !== cursor || slots.get(layerId) !== slot) return;
-      if (changed && cursor.current) setFrame(slot, toFrame(cursor.current));
+      if (changed && cursor.current) {
+        const frame = toFrame(cursor.current);
+        if (AS_BITMAP) {
+          const bitmap = await createImageBitmap(frame);
+          if (disposed || slot.cursor !== cursor || slots.get(layerId) !== slot) {
+            bitmap.close();
+            frame.close();
+            return;
+          }
+          slot.bitmap?.close();
+          slot.bitmap = bitmap;
+        }
+        setFrame(slot, frame);
+      }
       slot.lastTime = time;
     } catch (e) {
       // Decoder error: drop the session (the next request starts a new one) and keep the old frame.
@@ -104,7 +127,7 @@ export function createExactFrames(): ExactFrames {
       slot = undefined;
     }
     if (!slot) {
-      slot = { assetId, cursor: null, frame: null, lastTime: NaN, wanted: NaN, queued: 0, chain: Promise.resolve() };
+      slot = { assetId, cursor: null, frame: null, bitmap: null, lastTime: NaN, wanted: NaN, queued: 0, chain: Promise.resolve() };
       slots.set(layerId, slot);
     }
     if ((time === slot.wanted && slot.queued > 0) || (time === slot.lastTime && slot.frame)) return slot.chain;
@@ -121,6 +144,8 @@ export function createExactFrames(): ExactFrames {
     slot.cursor?.close();
     slot.cursor = null;
     if (slot.frame) setFrame(slot, null);
+    slot.bitmap?.close();
+    slot.bitmap = null;
     slots.delete(layerId);
   }
 
@@ -135,7 +160,12 @@ export function createExactFrames(): ExactFrames {
     },
     frame(layerId: string, assetId: string) {
       const slot = slots.get(layerId);
-      return slot && slot.assetId === assetId ? slot.frame : null;
+      if (!slot || slot.assetId !== assetId) return null;
+      return AS_BITMAP ? slot.bitmap : slot.frame;
+    },
+    frameSpan(layerId: string) {
+      const f = slots.get(layerId)?.frame;
+      return f ? { start: f.timestamp / 1e6, duration: (f.duration ?? 0) / 1e6 } : null;
     },
     get version() {
       return version;

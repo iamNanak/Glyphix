@@ -235,24 +235,14 @@ class FrameBarCache {
   }
 }
 
-/**
- * Firefox's WebGPU uploads a VideoFrame as its first frame forever (VideoFrameTexture stays on frame 0);
- * there, frames go through a 2D canvas copy instead.
- */
-const COPY_VIDEO_FRAMES = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
-
 /** One layer's video frame as a GPU texture; re-uploads only when the frame changes. */
 class VideoTex {
   private tex: THREE.Texture | null = null;
-  private copy: OffscreenCanvas | null = null;
-
-  constructor(private readonly copyFrames: boolean) {}
   private img: FrameImage | null = null;
   private version = -1;
   private size = '';
 
-  get(frame: FrameImage, version: number): THREE.Texture {
-    const img = this.copyFrames && frame instanceof VideoFrame ? this.copied(frame) : frame;
+  get(img: FrameImage, version: number): THREE.Texture {
     const w = img instanceof VideoFrame ? img.displayWidth : (img as { width: number }).width;
     const h = img instanceof VideoFrame ? img.displayHeight : (img as { height: number }).height;
     const size = `${w}x${h}|${img instanceof VideoFrame}`;
@@ -279,14 +269,6 @@ class VideoTex {
     return this.tex;
   }
 
-  private copied(frame: VideoFrame): OffscreenCanvas {
-    const w = frame.displayWidth;
-    const h = frame.displayHeight;
-    if (!this.copy || this.copy.width !== w || this.copy.height !== h) this.copy = new OffscreenCanvas(w, h);
-    this.copy.getContext('2d')!.drawImage(frame, 0, 0);
-    return this.copy;
-  }
-
   dispose() {
     this.tex?.dispose();
     this.tex = null;
@@ -294,18 +276,14 @@ class VideoTex {
 }
 
 class ImageNode implements LayerNode {
-  private video: VideoTex;
+  private video = new VideoTex();
   readonly root = new THREE.Group();
   private image: ReturnType<typeof createImageMaterial> | null = null;
   private imageMesh: THREE.Mesh | null = null;
   private shadow = createShadowMaterial();
   private shadowMesh: THREE.Mesh;
 
-  constructor(
-    private readonly bars: FrameBarCache,
-    copyVideoFrames: boolean,
-  ) {
-    this.video = new VideoTex(copyVideoFrames);
+  constructor(private readonly bars: FrameBarCache) {
     this.shadowMesh = new THREE.Mesh(tiltPlane, this.shadow.mat);
     this.shadowMesh.userData.order = 1;
     this.root.add(this.shadowMesh);
@@ -740,7 +718,7 @@ export class ThreeBackend implements RenderBackend {
       seen.add(nodeKey);
       let node = this.nodes.get(nodeKey);
       if (!node) {
-        node = item.kind === 'background' ? new BackgroundNode() : item.kind === 'image' ? new ImageNode(this.bars, COPY_VIDEO_FRAMES && this.kind === 'webgpu') : new TextNode(this.atlas);
+        node = item.kind === 'background' ? new BackgroundNode() : item.kind === 'image' ? new ImageNode(this.bars) : new TextNode(this.atlas);
         this.nodes.set(nodeKey, node);
         this.scene.add(node.root);
       }

@@ -55,5 +55,19 @@ await audit('effect cards (glow keyframed, grain, gradient map)');
 await page.getByRole('button', { name: 'Add adjustment layer' }).click();
 await page.waitForTimeout(300);
 await audit('adjustment layer selected');
+// Video layer: the Video section (needs scripts/fixtures; skipped without them).
+const hasFixture = await page.evaluate(async () => (await fetch('/scripts/fixtures/clip-1080p30.mp4', { method: 'HEAD' })).ok);
+if (hasFixture) {
+  await page.evaluate(async () => {
+    const { importVideo } = window.__glyphix.video;
+    const { id } = await importVideo(await (await fetch('/scripts/fixtures/clip-1080p30.mp4')).blob());
+    const ed = window.__glyphix.editor.getState();
+    const i = ed.doc.comp.layers.findIndex((l) => l.id === 'shot');
+    ed.set('video', [{ path: ['comp', 'layers', i, 'assetId'], value: id }, { path: ['comp', 'layers', i, 'video'], value: { start: 0, in: 0, out: 5, loop: false, volume: 1, muted: false } }]);
+    window.__glyphix.select('shot');
+  });
+  await page.waitForTimeout(500);
+  await audit('video layer selected (Video section)');
+} else console.log('SKIP video layer — run scripts/make-video-fixtures.sh');
 await browser.close();
 process.exit(failures ? 1 : 0);
