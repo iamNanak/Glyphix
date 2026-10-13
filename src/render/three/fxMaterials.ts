@@ -5,6 +5,7 @@
 // Effect parameters are in comp px so preview (any zoom) and export agree.
 import * as THREE from 'three/webgpu';
 import {
+  abs,
   clamp,
   cos,
   dot,
@@ -12,14 +13,19 @@ import {
   float,
   floor,
   Fn,
+  If,
   fract,
+  int,
+  ivec2,
   length,
   max,
   mix,
   pow,
+  round,
   select,
   sin,
   smoothstep,
+  sqrt,
   step,
   texture,
   uniform,
@@ -29,6 +35,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { blankTexture } from './materials';
+import { LUT_SIZE } from './asciiAtlas';
 
 type F = THREE.Node<'float'>;
 type V2 = THREE.Node<'vec2'>;
@@ -356,6 +363,121 @@ function colorAdjustMaterial() {
   return { mat, src, brightness, contrast, saturation, hue };
 }
 
+/**
+ * ASCII, pass 1: everything per cell (cells align to the comp origin, like pixelate), two texels per cell:
+ * (ink colour, cell alpha) and (glyph index). 5×5 taps spaced a quarter cell apart: the inner 4×4 average
+ * the cell's premultiplied colour; the left/right (top/bottom) column pairs give the luminance gradient
+ * (the last row/column reaches into the next cell, so steps on a cell boundary still register).
+ */
+function asciiCellsMaterial() {
+  const src = texture(blankTexture);
+  const lut = texture(blankTexture);
+  const size = uniform(12); // cell, comp px
+  const cellOrigin = uniform(new THREE.Vector2(0, 0)); // cell index of texel pair (0,0)
+  const targetSize = uniform(new THREE.Vector2(2, 1)); // texels
+  const edges = uniform(0);
+  const threshold = uniform(0.25);
+  const count = uniform(10); // charset glyphs (the edge glyphs follow)
+  const mode = uniform(0);
+  const invert = uniform(0);
+  const contrast = uniform(0);
+  const gamma = uniform(1);
+  const ink = linearColor();
+  const ink2 = linearColor();
+  const mat = passMaterial(() => {
+    const t = floor(uv().mul(targetSize));
+    const cx = floor(t.x.mul(0.5));
+    const second = t.x.sub(cx.mul(2)); // 0: colour texel, 1: glyph texel
+    const cell = vec2(cx, t.y).add(cellOrigin);
+    // Taps stay inside the comp (half a buffer px in), so partial cells at the comp edge read the same
+    // pixels in preview (which draws beyond the artboard) and export.
+    const lo = fxFrame.origin.add(0.5);
+    const hi = fxFrame.origin.add(fxFrame.compSize.mul(fxFrame.pxPerUnit)).sub(0.5);
+    let sum: V4 = vec4(0);
+    let gx: F = float(0);
+    let gy: F = float(0);
+    for (let j = 0; j < 5; j++) {
+      for (let i = 0; i < 5; i++) {
+        const comp = cell.add(vec2((i + 0.5) / 4, (j + 0.5) / 4)).mul(size);
+        const c = src.sample(clamp(comp.mul(fxFrame.pxPerUnit).add(fxFrame.origin), lo, hi).div(fxFrame.res));
+        if (i < 4 && j < 4) sum = sum.add(c);
+        // Perceptual-ish luminance of the premultiplied colour (transparent counts as dark).
+        const l = sqrt(luma(c.rgb));
+        if (i <= 1) gx = gx.sub(l);
+        if (i >= 3) gx = gx.add(l);
+        if (j <= 1) gy = gy.sub(l);
+        if (j >= 3) gy = gy.add(l);
+      }
+    }
+    const avg = sum.div(16);
+    const alpha = avg.a;
+    const col = avg.rgb.div(max(alpha, 1e-5));
+    const value = max(max(col.r, col.g), col.b);
+    // Mono and two-colour follow luminance; original colour follows value, so ink × hue reproduces the colour.
+    let b: F = clamp(select(mode.equal(1), value, luma(col)), 0, 1);
+    // Ink density follows perceptual brightness (like classic ASCII art; γ = 0.45 makes it follow linear
+    // light instead): contrast around mid-grey, then the gamma curve.
+    const g = clamp(pow(b, float(1 / 2.2)).sub(0.5).mul(contrast.add(1)).add(0.5), 0, 1);
+    b = pow(g, float(1).div(gamma));
+    b = mix(b, float(1).sub(b), invert);
+    // Calibrated LUT: brightness → the glyph whose measured ink coverage matches it.
+    let idx: F = round(lut.load(ivec2(int(round(b.mul(LUT_SIZE - 1))), int(0))).r.mul(255));
+    // Edge glyph by gradient direction (y down): | for horizontal gradients, - for vertical, / and \ between.
+    gx = gx.div(10);
+    gy = gy.div(10);
+    const ax = abs(gx);
+    const ay = abs(gy);
+    const bin = select(ax.greaterThan(ay.mul(2.414)), float(0), select(ay.greaterThan(ax.mul(2.414)), float(1), select(gx.mul(gy).greaterThan(0), float(2), float(3))));
+    idx = select(edges.mul(step(threshold, length(vec2(gx, gy)))).greaterThan(0.5), count.add(bin), idx);
+    const hue = select(invert.greaterThan(0.5), col, col.div(max(value, 1e-4)));
+    const two = fromGamma(mix(toGamma(ink2.xyz), toGamma(ink.xyz), b));
+    const inkRGB = select(mode.equal(0), ink.xyz, select(mode.equal(1), hue, two));
+    return select(second.greaterThan(0.5), vec4(idx, 0, 0, 1), vec4(inkRGB, alpha));
+  });
+  return { mat, src, lut, size, cellOrigin, targetSize, edges, threshold, count, mode, invert, contrast, gamma, ink, ink2 };
+}
+
+/**
+ * ASCII, pass 2: each pixel finds its cell, reads the cell's two texels and samples the glyph's coverage
+ * from the charset atlas at an explicit mip level (box-filtered mips keep coverage at any cell size;
+ * explicit, because derivatives jump at cell borders).
+ */
+function asciiDrawMaterial() {
+  const src = texture(blankTexture); // the input, for "mix"
+  const cells = texture(blankTexture);
+  const atlas = texture(blankTexture);
+  const size = uniform(12);
+  const cellOrigin = uniform(new THREE.Vector2(0, 0));
+  const gridMax = uniform(new THREE.Vector2(0, 0)); // last valid cell (texel pair)
+  const atlasCells = uniform(new THREE.Vector2(16, 1)); // glyph columns, rows
+  const lod = uniform(0);
+  const inset = uniform(0.01); // cell-uv inset: half a texel of the coarser mip, so neighbours never bleed in
+  const background = uniform(1);
+  const amount = uniform(1);
+  const bg = linearColor();
+  const mat = passMaterial(() => {
+    const p = compPos().div(size);
+    const cell = floor(p);
+    const f = clamp(p.sub(cell), inset, float(1).sub(inset));
+    const texel = ivec2(clamp(cell.sub(cellOrigin), vec2(0), gridMax).mul(vec2(2, 1)));
+    const c = cells.load(texel);
+    const idx = cells.load(texel.add(ivec2(1, 0))).r;
+    const row = floor(idx.div(atlasCells.x));
+    const glyphUV = vec2(idx.sub(row.mul(atlasCells.x)), row).add(f).div(atlasCells);
+    const cov = atlas.sample(glyphUV).level(lod).r;
+    const inkA = cov.mul(c.a);
+    const bgA = background.mul(c.a);
+    const rest = float(1).sub(inkA);
+    const out = vec4(c.rgb.mul(inkA).add(bg.xyz.mul(bgA.mul(rest))), inkA.add(bgA.mul(rest))).toVar();
+    // Uniform branch: at full mix (the usual case) the input isn't read at all.
+    If(amount.lessThan(1), () => {
+      out.assign(mix(src.sample(uv()), out, amount));
+    });
+    return out;
+  });
+  return { mat, src, cells, atlas, size, cellOrigin, gridMax, atlasCells, lod, inset, background, amount, bg };
+}
+
 /** Every effect material, created once per backend (passes are drawn one after another). */
 export function createFxMaterials() {
   return {
@@ -372,6 +494,7 @@ export function createFxMaterials() {
     gradientMap: gradientMapMaterial(),
     dissolve: dissolveMaterial(),
     pixelate: pixelateMaterial(),
+    ascii: { cells: asciiCellsMaterial(), draw: asciiDrawMaterial() },
     vignette: vignetteMaterial(),
     colorAdjust: colorAdjustMaterial(),
   };

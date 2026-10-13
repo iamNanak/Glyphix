@@ -1,4 +1,4 @@
-import { createDemoDoc, createEffect, defaultEnter, defaultExit, defaultLoop, Easings, REST_POSE, type Doc, type ImageLayer, type TextLayer } from '@/doc';
+import { createAdjustmentLayer, createDemoDoc, createEffect, defaultEnter, defaultExit, defaultLoop, Easings, REST_POSE, type Doc, type ImageLayer, type TextLayer } from '@/doc';
 import { assetStore } from '@/assets/assetStore';
 import { createDemoScreenshot } from '@/assets/demoScreenshot';
 
@@ -125,6 +125,14 @@ function fxScene(): Doc {
   return doc;
 }
 
+/** The 1080p demo under an ASCII adjustment layer: 160×90 cells (12 px) over the whole comp. */
+function asciiScene(): Doc {
+  const doc = createDemoDoc();
+  doc.name = '1080p + ASCII 160×90';
+  doc.comp.layers.push(createAdjustmentLayer('ascii'));
+  return doc;
+}
+
 export const SCENES: Record<string, { label: string; build: () => Doc }> = {
   demo: { label: 'Demo', build: () => createDemoDoc() },
   g300: { label: '300 glyphs', build: () => glyphScene(300) },
@@ -132,6 +140,7 @@ export const SCENES: Record<string, { label: string; build: () => Doc }> = {
   k300: { label: '300 glyphs, enter + exit + wave', build: () => glyphScene(300, true) },
   big: { label: '4K + 10 layers', build: bigScene },
   fx: { label: '4K layer + 3 effects', build: fxScene },
+  ascii: { label: '1080p + ASCII 160×90', build: asciiScene },
 };
 
 /** Rough VRAM estimate in MB: textures (with mips) + glyph atlas + drawing buffer. */

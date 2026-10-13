@@ -21,6 +21,7 @@ import {
 import { useEditor } from './store';
 import { Button, ColorField, Field, IconButton, Section } from './ui';
 import { Slider } from '@/components/wensity/slider';
+import { Select } from '@/components/wensity/select';
 
 type Edit = (label: string, path: (string | number)[], value: unknown) => void;
 
@@ -81,6 +82,23 @@ function ParamRow({
     </button>
   );
 
+  if (def.options)
+    return (
+      <div className="space-y-1.5">
+        <span className="flex items-center gap-1 text-xs font-medium text-dim">
+          {keyButton}
+          {def.label}
+        </span>
+        <Select
+          aria-label={name}
+          selectSize="sm"
+          fullWidth
+          value={String(Math.round(value))}
+          options={def.options.map((o) => ({ value: String(o.value), label: o.label }))}
+          onValueChange={(v) => set(Number(v))}
+        />
+      </div>
+    );
   if (def.toggle)
     return (
       <div className="text-xs font-medium text-dim">

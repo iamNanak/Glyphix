@@ -6,6 +6,7 @@
 import * as THREE from 'three/webgpu';
 import type { Color, ResolvedEffect } from '@/doc';
 import { createFxMaterials, fxFrame, type FxMaterials } from './fxMaterials';
+import { ASCII_CELL, ASCII_COLS, ASCII_MAX_LOD, asciiAtlas, CHARSETS, LUT_SIZE } from './asciiAtlas';
 
 const DEG = Math.PI / 180;
 const tmpColor = new THREE.Color();
@@ -98,6 +99,8 @@ export class Compositor {
   private m: FxMaterials = createFxMaterials();
   private pool = new TargetPool();
   private f!: CompositeFrame;
+  /** ASCII charset atlas + LUT textures, per charset (CPU data is shared; textures are per renderer). */
+  private asciiTex = new Map<number, { atlas: THREE.DataTexture; lut: THREE.DataTexture; count: number; rows: number }>();
 
   constructor(private readonly renderer: THREE.WebGPURenderer) {}
 
@@ -173,7 +176,9 @@ export class Compositor {
   dispose() {
     this.pool.dispose();
     const m = this.m;
-    [m.copy, m.over, m.mix, m.blur, m.glow.bright, m.glow.combine, m.shadow, m.grain, m.displace, m.glitch, m.rgbSplit, m.gradientMap, m.dissolve, m.pixelate, m.vignette, m.colorAdjust].forEach((x) => x.mat.dispose());
+    [m.copy, m.over, m.mix, m.blur, m.glow.bright, m.glow.combine, m.shadow, m.grain, m.displace, m.glitch, m.rgbSplit, m.gradientMap, m.dissolve, m.pixelate, m.ascii.cells, m.ascii.draw, m.vignette, m.colorAdjust].forEach((x) => x.mat.dispose());
+    this.asciiTex.forEach((t) => (t.atlas.dispose(), t.lut.dispose()));
+    this.asciiTex.clear();
   }
 
   // -------------------------------------------------------------------------
@@ -320,6 +325,8 @@ export class Compositor {
         return this.simple(m.pixelate, src, (u) => {
           u.size.value = q.size!;
         });
+      case 'ascii':
+        return this.ascii(e, src);
       case 'vignette':
         return this.simple(m.vignette, src, (u) => {
           u.amount.value = q.amount!;
@@ -335,6 +342,87 @@ export class Compositor {
           u.hue.value = q.hue! * DEG;
         });
     }
+  }
+
+  private asciiTextures(charset: number) {
+    let t = this.asciiTex.get(charset);
+    if (t) return t;
+    const a = asciiAtlas(charset);
+    // Our own box-filtered mips (not GPU-generated), so both backends sample identical levels.
+    const atlas = new THREE.DataTexture(a.mips[0]!.data, a.width, a.height, THREE.RedFormat, THREE.UnsignedByteType);
+    atlas.mipmaps = a.mips;
+    atlas.minFilter = THREE.LinearMipmapLinearFilter;
+    atlas.magFilter = THREE.LinearFilter;
+    const lut = new THREE.DataTexture(a.lut, LUT_SIZE, 1, THREE.RedFormat, THREE.UnsignedByteType);
+    for (const tex of [atlas, lut]) {
+      tex.generateMipmaps = false;
+      tex.unpackAlignment = 1;
+      tex.colorSpace = THREE.NoColorSpace;
+      tex.flipY = false;
+      tex.needsUpdate = true;
+    }
+    t = { atlas, lut, count: a.count, rows: a.height / ASCII_CELL };
+    this.asciiTex.set(charset, t);
+    return t;
+  }
+
+  /**
+   * ASCII: pass 1 reduces each visible cell to two texels (ink colour + alpha, glyph index), pass 2 draws
+   * the glyphs. The cell grid covers the visible part of the comp; its target is rounded up so it is
+   * reused while the cell size animates or the view pans.
+   */
+  private ascii(e: ResolvedEffect, src: THREE.RenderTarget): THREE.RenderTarget {
+    const q = e.params;
+    const f = this.f;
+    const k = f.pxPerUnit;
+    const size = Math.max(1, q.size!);
+    const compRange = (bufMax: number, origin: number, compMax: number) => {
+      const lo = Math.max(0, -origin / k);
+      const hi = Math.min(compMax, (bufMax - origin) / k);
+      const c0 = Math.floor(lo / size);
+      return [c0, Math.max(c0, Math.ceil(hi / size) - 1)] as const;
+    };
+    const [cx0, cx1] = compRange(f.width, f.originX, f.compWidth);
+    const [cy0, cy1] = compRange(f.height, f.originY, f.compHeight);
+    const cols = cx1 - cx0 + 1;
+    const rows = cy1 - cy0 + 1;
+    const cells = this.target(false, Math.ceil(cols / 32) * 64, Math.ceil(rows / 32) * 32);
+
+    const tex = this.asciiTextures(Math.min(CHARSETS.length - 1, Math.max(0, Math.round(q.charset!))));
+    const { cells: c, draw: d } = this.m.ascii;
+    c.src.value = src.texture;
+    c.lut.value = tex.lut;
+    c.size.value = size;
+    c.cellOrigin.value.set(cx0, cy0);
+    c.targetSize.value.set(cells.width, cells.height);
+    c.edges.value = q.edges! >= 0.5 ? 1 : 0;
+    c.threshold.value = q.edgeThreshold!;
+    c.count.value = tex.count;
+    c.mode.value = Math.round(q.colorMode!);
+    c.invert.value = q.invert! >= 0.5 ? 1 : 0;
+    c.contrast.value = q.contrast!;
+    c.gamma.value = Math.max(0.05, q.gamma!);
+    setLinear(c.ink.value, e.colors.ink!);
+    setLinear(c.ink2.value, e.colors.ink2!);
+    this.pass(c.mat, cells);
+
+    d.src.value = src.texture;
+    d.cells.value = cells.texture;
+    d.atlas.value = tex.atlas;
+    d.size.value = size;
+    d.cellOrigin.value.set(cx0, cy0);
+    d.gridMax.value.set(cols - 1, rows - 1);
+    d.atlasCells.value.set(ASCII_COLS, tex.rows);
+    const lod = Math.min(ASCII_MAX_LOD, Math.max(0, Math.log2(ASCII_CELL / (size * k))));
+    d.lod.value = lod;
+    d.inset.value = (0.5 * 2 ** Math.ceil(lod)) / ASCII_CELL;
+    d.background.value = q.background!;
+    d.amount.value = q.mix!;
+    setLinear(d.bg.value, e.colors.bg!);
+    const out = this.out();
+    this.pass(d.mat, out);
+    this.pool.release(cells);
+    return out;
   }
 
   private simple<U extends { mat: THREE.Material; src: { value: THREE.Texture } }>(u: U, src: THREE.RenderTarget, set: (u: U) => void) {

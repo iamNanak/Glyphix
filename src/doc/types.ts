@@ -46,6 +46,7 @@ export type EffectKind =
   | 'gradientMap'
   | 'dissolve'
   | 'pixelate'
+  | 'ascii'
   | 'vignette'
   | 'colorAdjust';
 
