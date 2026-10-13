@@ -24,6 +24,8 @@ describe('effects', () => {
       for (const p of d.params) {
         expect(p.default, `${d.kind}.${p.key}`).toBeGreaterThanOrEqual(p.min);
         expect(p.default, `${d.kind}.${p.key}`).toBeLessThanOrEqual(p.max);
+        // Choices: one option per integer step of the range, default among them.
+        if (p.options) expect(p.options.map((o) => o.value)).toEqual(Array.from({ length: p.max - p.min + 1 }, (_, i) => p.min + i));
       }
       const e = createEffect(d.kind);
       expect(Object.keys(e.params)).toEqual(d.params.map((p) => p.key));

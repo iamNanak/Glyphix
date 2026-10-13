@@ -16,6 +16,8 @@ export interface EffectParamDef {
   toggle?: boolean;
   /** Shown as 0–100 % (value is 0..1 or −1..1). */
   percent?: boolean;
+  /** A choice (rendered as a select): the value is one of these. Still a number, so it can be keyed (it steps). */
+  options?: { value: number; label: string }[];
 }
 
 export interface EffectColorDef {
@@ -32,6 +34,20 @@ export interface EffectDef {
   params: EffectParamDef[];
   colors: EffectColorDef[];
 }
+
+const choice = (key: string, label: string, labels: readonly string[], def = 0): EffectParamDef => ({
+  key,
+  label,
+  min: 0,
+  max: labels.length - 1,
+  step: 1,
+  default: def,
+  options: labels.map((l, value) => ({ value, label: l })),
+});
+
+/** ASCII charsets and colour modes, by param value (the renderer's CHARSETS follow this order). */
+export const ASCII_CHARSETS = ['Standard', 'Blocks', 'Detailed', 'Binary'] as const;
+export const ASCII_COLOR_MODES = ['Mono', 'Original colour', 'Two-colour'] as const;
 
 const p = (key: string, label: string, min: number, max: number, def: number, step = 1, extra: Partial<EffectParamDef> = {}): EffectParamDef => ({
   key,
@@ -144,6 +160,28 @@ export const EFFECTS: readonly EffectDef[] = [
     colors: [],
   },
   {
+    kind: 'ascii',
+    label: 'ASCII',
+    description: 'Redraw as text characters',
+    params: [
+      p('size', 'Cell size', 4, 100, 12, 1, { unit: 'px' }),
+      choice('charset', 'Characters', ASCII_CHARSETS),
+      choice('colorMode', 'Colour mode', ASCII_COLOR_MODES, 1),
+      p('background', 'Background', 0, 1, 1, 0.01, { percent: true }),
+      p('contrast', 'Contrast', -1, 1, 0, 0.01, { percent: true }),
+      p('gamma', 'Gamma', 0.2, 5, 0.7, 0.05),
+      p('edges', 'Edges', 0, 1, 0, 1, { toggle: true }),
+      p('edgeThreshold', 'Edge threshold', 0, 1, 0.25, 0.01, { percent: true }),
+      p('invert', 'Invert', 0, 1, 0, 1, { toggle: true }),
+      p('mix', 'Mix', 0, 1, 1, 0.01, { percent: true }),
+    ],
+    colors: [
+      { key: 'ink', label: 'Glyph colour', default: [0.82, 1, 0.86, 1] },
+      { key: 'ink2', label: 'Glyph shadow colour', default: [0.1, 0.25, 0.7, 1] },
+      { key: 'bg', label: 'Background colour', default: [0.03, 0.04, 0.05, 1] },
+    ],
+  },
+  {
     kind: 'vignette',
     label: 'Vignette',
     description: 'Darken the edges of the canvas',
@@ -230,6 +268,7 @@ export function isNoOp(e: ResolvedEffect): boolean {
     case 'rgbSplit':
       return q.amount! <= 0;
     case 'gradientMap':
+    case 'ascii':
       return q.mix! <= 0;
     case 'dissolve':
       return q.progress! <= 0;
