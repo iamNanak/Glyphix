@@ -1,5 +1,8 @@
 // Asset store: images keyed by content hash, with ½ and ¼ proxies for fast preview.
 // Originals are kept as compressed blobs (for persistence in Milestone C), never as raw pixels in history.
+// Uploaded fonts are assets too (fontAssets.ts); assetBlob/loadAssetBlob route them by id prefix.
+import { FONT_ASSET_PREFIX } from '@/doc/assets';
+import { fontBlob, loadFontBlob } from './fontAssets';
 
 export type AssetSource = ImageBitmap | HTMLCanvasElement | OffscreenCanvas;
 
@@ -128,7 +131,12 @@ export async function importImage(blob: Blob): Promise<ImportedImage> {
 }
 
 /** Load a stored file back under its original asset id (projects reference assets by id). */
-export async function loadAssetBlob(id: string, blob: Blob): Promise<Asset> {
+export async function loadAssetBlob(id: string, blob: Blob): Promise<void> {
+  if (id.startsWith(FONT_ASSET_PREFIX)) return loadFontBlob(id, blob);
+  await loadImageBlob(id, blob);
+}
+
+async function loadImageBlob(id: string, blob: Blob): Promise<Asset> {
   const existing = assetStore.get(id);
   if (existing) return existing;
   const full = await decodeImage(blob);
@@ -138,6 +146,7 @@ export async function loadAssetBlob(id: string, blob: Blob): Promise<Asset> {
 
 /** The asset as an encoded file. Canvas-only assets (e.g. the procedural demo) are encoded to PNG once. */
 export async function assetBlob(id: string): Promise<Blob | null> {
+  if (id.startsWith(FONT_ASSET_PREFIX)) return fontBlob(id);
   const asset = assetStore.get(id);
   if (!asset) return null;
   if (asset.blob) return asset.blob;

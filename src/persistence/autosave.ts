@@ -1,9 +1,9 @@
 // Autosave: every document change is saved ~800 ms after the last edit, and on tab hide.
 // On startup the last project is restored (or the demo becomes a new project).
 import { create } from 'zustand';
-import { createDemoDoc, type Doc } from '@/doc';
+import { createDemoDoc, posterTime, type Doc } from '@/doc';
 import { useEditor } from '@/app/store';
-import { exportPng } from '@/export/exporter';
+import { renderThumbnail } from '@/export/exporter';
 import { getLastProjectId, loadProject, newProjectId, saveProject, setThumbnail } from './projects';
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -27,8 +27,8 @@ async function thumbnail(doc: Doc, force = false): Promise<Blob | undefined> {
   if (!force && Date.now() - (lastThumbAt.get(doc.id) ?? 0) < THUMB_EVERY_MS) return undefined;
   lastThumbAt.set(doc.id, Date.now());
   try {
-    // A late frame, after entrance animations have played.
-    return await exportPng(doc, Math.max(0, doc.comp.duration - 0.05), { scale: 360 / doc.comp.width });
+    // After entrances have played and before any exit starts.
+    return await renderThumbnail(doc, posterTime(doc), 360);
   } catch {
     return undefined; // thumbnails are best-effort
   }
@@ -70,6 +70,10 @@ export function startAutosave(): () => void {
   };
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', onHide);
+  // Build the thumbnail renderer while the editor is idle, so its one-time shader build never
+  // lands in the middle of a drag (the first save after an edit would otherwise pay for it).
+  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 1500));
+  idle(() => void renderThumbnail(useEditor.getState().doc, 0, 64).catch(() => undefined), { timeout: 4000 });
   return () => {
     started = false;
     unsub();

@@ -1,5 +1,5 @@
 import { NO_MOTION } from './motion';
-import { FULL_CROP, NO_FRAME, NO_TILT, type Comp, type ImageLayer } from './types';
+import { FULL_CROP, NO_FRAME, NO_TILT, type Comp, type ImageLayer, type TextLayer } from './types';
 
 export function newLayerId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -31,5 +31,34 @@ export function createImageLayer(comp: Comp, assetId: string, srcW: number, srcH
     motion: NO_MOTION,
     opacity: { static: 1 },
     transform: { x: { static: comp.width / 2 }, y: { static: comp.height / 2 }, scale: { static: 1 }, rotation: { static: 0 } },
+  };
+}
+
+/** A new headline in the middle of the comp. */
+export function createTextLayer(comp: Comp, text = 'Your text', fontId = 'inter'): TextLayer {
+  const fontSize = Math.round(Math.min(comp.width, comp.height) / 11);
+  return {
+    id: newLayerId('text'),
+    name: 'Text',
+    type: 'text',
+    visible: true,
+    locked: false,
+    text,
+    fontId,
+    weight: 600,
+    fontSize,
+    lineHeight: 1.15,
+    color: [1, 1, 1, 1],
+    gradient: null,
+    outline: null,
+    shadow: null,
+    align: 'center',
+    tracking: -0.01,
+    opacity: { static: 1 },
+    glow: { static: 0 },
+    glowColor: [1, 1, 1, 1],
+    transform: { x: { static: comp.width / 2 }, y: { static: comp.height / 2 }, scale: { static: 1 }, rotation: { static: 0 } },
+    animator: null,
+    motion: NO_MOTION,
   };
 }

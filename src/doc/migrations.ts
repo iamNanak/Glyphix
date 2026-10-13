@@ -18,6 +18,47 @@ const MIGRATIONS: Record<number, (doc: Json) => Json> = {
       },
     };
   },
+  // v2 → v3: motion gains `exit`; text gains weight/lineHeight/gradient/outline/shadow;
+  // the glyph animator's `from` becomes a full pose with unit + falloff.
+  2: (doc) => {
+    const comp = doc.comp as Json & { layers: Json[] };
+    const layers = comp.layers.map((l) => {
+      if (l.type === 'background') return l;
+      const motion = { exit: null, ...(l.motion as Json) };
+      if (l.type !== 'text') return { ...l, motion };
+      const a = l.animator as (Json & { from?: Record<string, number> }) | null;
+      // Tolerate documents that already have the new shape (hand-edited or partially migrated).
+      const animator = !a || !a.from ? a : {
+        unit: 'glyph',
+        order: a.order,
+        start: a.start,
+        duration: a.duration,
+        stagger: a.stagger,
+        falloff: { kind: 'linear' },
+        seed: a.seed,
+        easing: a.easing,
+        pose: {
+          offsetX: a.from.offsetX ?? 0,
+          offsetY: a.from.offsetY ?? 0,
+          scaleX: a.from.scale ?? 1,
+          scaleY: a.from.scale ?? 1,
+          rotation: a.from.rotation ?? 0,
+          rotateX: 0,
+          rotateY: 0,
+          skewX: 0,
+          opacity: a.from.opacity ?? 1,
+          blur: 0,
+          spread: 1,
+          color: null,
+          randomOffset: 0,
+          randomRotation: 0,
+          scramble: false,
+        },
+      };
+      return { weight: 400, lineHeight: 1.15, gradient: null, outline: null, shadow: null, ...l, animator, motion };
+    });
+    return { ...doc, comp: { ...comp, layers } };
+  },
 };
 
 export class NewerSchemaError extends Error {

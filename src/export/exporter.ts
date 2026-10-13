@@ -18,7 +18,8 @@ export interface ExportOptions {
 async function prepare(doc: Doc, opts: ExportOptions): Promise<{ backend: RenderBackend; canvas: HTMLCanvasElement; width: number; height: number }> {
   const fonts = new Set(doc.comp.layers.flatMap((l) => (l.type === 'text' ? [l.fontId] : [])));
   // Frame bars draw their URL text with the CSS Inter face; make sure it's ready so export matches preview.
-  await Promise.all([...[...fonts].map((f) => fontLibrary.load(f)), document.fonts.load('500 12px Inter')]);
+  // Missing fonts fall back to Inter (the same fallback the preview uses).
+  await Promise.all([fontLibrary.loadAll(fonts), document.fonts.load('500 12px Inter')]);
   const scale = opts.scale ?? 1;
   // Encoders need even dimensions.
   const width = Math.round((doc.comp.width * scale) / 2) * 2;
@@ -50,6 +51,34 @@ export async function exportPng(doc: Doc, t: number, opts: ExportOptions = {}): 
     await backend.idle().catch(() => {});
     backend.dispose();
   }
+}
+
+// Thumbnails: one small renderer reused for every autosave. Creating a renderer builds and compiles
+// every shader on the main thread (a visible hitch); preview proxies are fine at thumbnail size.
+let thumbs: Promise<RenderBackend> | null = null;
+let thumbQueue: Promise<unknown> = Promise.resolve();
+
+export function renderThumbnail(doc: Doc, t: number, width: number): Promise<Blob> {
+  const job = thumbQueue.then(async () => {
+    thumbs ??= createBackend({ canvas: document.createElement('canvas') }).then((b) => {
+      b.onLost = () => (thumbs = null);
+      return b;
+    });
+    const backend = await thumbs;
+    const fonts = doc.comp.layers.flatMap((l) => (l.type === 'text' ? [l.fontId] : []));
+    await fontLibrary.loadAll(fonts);
+    const w = Math.max(2, Math.round(width / 2) * 2);
+    const h = Math.max(2, Math.round((width * doc.comp.height) / doc.comp.width / 2) * 2);
+    backend.setSize(w, h, 1);
+    backend.render(evaluate(doc, t)); // first render pulls new glyphs into the atlas
+    const bmp = await renderFrameBitmap(backend, doc, t);
+    const out = new OffscreenCanvas(w, h);
+    out.getContext('2d')!.drawImage(bmp, 0, 0);
+    bmp.close();
+    return out.convertToBlob({ type: 'image/png' });
+  });
+  thumbQueue = job.catch(() => undefined);
+  return job;
 }
 
 export interface VideoExportResult {

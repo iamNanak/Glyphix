@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Undo2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Type, Undo2 } from 'lucide-react';
 import { flushSave, useSaveStatus } from '@/persistence/autosave';
 import { openProjectFile, saveProjectFile } from '@/persistence/actions';
 import { PROJECT_EXTENSION } from '@/persistence/projectFile';
@@ -16,7 +16,7 @@ import { importImage } from '@/assets/assetStore';
 import { createImageLayer, fitSize, makeInsert, offsetProp } from '@/doc';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
-import { layerIndex } from './store';
+import { layerIndex, previewDoc } from './store';
 
 // Subscriptions are kept as low in the tree as possible: during a drag only <Stage> (canvas +
 // overlay) re-renders; panels subscribe to the narrow slices they display.
@@ -58,7 +58,9 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
 // ---------------------------------------------------------------------------
 
 function Stage({ onBackend, onError }: { onBackend: (kind: string) => void; onError: (msg: string | null) => void }) {
-  const doc = useEditor((s) => s.doc);
+  const realDoc = useEditor((s) => s.doc);
+  const preview = useEditor((s) => s.preview);
+  const doc = useMemo(() => previewDoc(realDoc, preview), [realDoc, preview]);
   const time = useEditor((s) => s.time);
   const forceWebGL = useEditor((s) => s.forceWebGL);
   const view = useView((s) => s.view);
@@ -128,6 +130,10 @@ function Toolbar({ backend, onProjects, onExport }: { backend: string; onProject
       </IconButton>
       <IconButton label="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}>
         <Redo2 size={16} />
+      </IconButton>
+      <span className="mx-1 h-5 w-px bg-line" aria-hidden />
+      <IconButton label="Add text" shortcut="T" onClick={() => useEditor.getState().addText()}>
+        <Type size={16} />
       </IconButton>
 
       <div className="ml-auto flex items-center gap-2">
@@ -270,6 +276,7 @@ function useShortcuts() {
       if (e.key === ' ') return handled(), s.setPlaying(!s.playing);
       if (e.key === 'Home') return s.setTime(0);
       if (e.key === 'Escape') return s.cropId ? s.setCrop(null) : s.select(null);
+      if (!mod && !e.altKey && key === 't') return handled(), s.addText();
       if (!sel || sel.locked) return;
       if (mod && key === 'd') return handled(), s.duplicateLayer(sel.id);
       if (mod && e.key === ']') return handled(), s.moveLayer(sel.id, e.shiftKey ? 999 : 1);

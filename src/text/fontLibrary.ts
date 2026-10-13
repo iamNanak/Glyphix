@@ -1,17 +1,20 @@
 import { coverageToSDF } from './sdf';
-
-// Bundled OFL fonts. Files live in /public/fonts with their licenses.
-export const BUNDLED_FONTS: Record<string, { family: string; url: string }> = {
-  inter: { family: 'Inter', url: '/fonts/Inter.ttf' },
-};
+import { bundledFont, DEFAULT_FONT_ID, effectiveWeight, type FontInfo } from './fonts';
 
 /** Atlas resolution: pixels per em, and SDF spread in px (also the glyph cell padding). */
 export const ATLAS_EM_PX = 64;
-export const ATLAS_SPREAD_PX = 12;
-const ATLAS_SIZE = 2048;
+export const ATLAS_SPREAD_PX = 16;
+/** Spread in em: how far outlines, shadows and glow can reach from the glyph edge. */
+export const ATLAS_SPREAD_EM = ATLAS_SPREAD_PX / ATLAS_EM_PX;
+/** Atlas pages are ATLAS_SIZE² R8 layers of one array texture, added on demand. */
+export const ATLAS_SIZE = 2048;
+export const ATLAS_MAX_PAGES = 8;
+const PAGE_BYTES = ATLAS_SIZE * ATLAS_SIZE;
 
 export interface AtlasGlyph {
-  /** Atlas texel rect. */
+  /** Atlas page (array texture layer). */
+  page: number;
+  /** Texel rect within the page. */
   ax: number;
   ay: number;
   aw: number;
@@ -27,7 +30,12 @@ export interface LaidOutGlyph {
   /** Pen origin in em, y-up, relative to the text block centre. */
   x: number;
   y: number;
+  /** Horizontal advance in em (including tracking). */
+  advance: number;
   glyph: AtlasGlyph | null; // null = whitespace / empty outline
+  /** Index of the source character (cluster) in the text. */
+  cluster: number;
+  line: number;
 }
 
 export interface TextLayout {
@@ -35,14 +43,32 @@ export interface TextLayout {
   /** Block size in em. */
   width: number;
   height: number;
+  /** Font actually used (the requested one, or the fallback when it is missing). */
+  fontId: string;
+  /** Atlas generation the glyph rects belong to. */
+  generation: number;
 }
 
-interface LoadedFont {
-  font: import('harfbuzzjs').Font;
+export interface LayoutSpec {
+  fontId: string;
+  weight: number;
+  text: string;
+  tracking: number;
+  align: 'left' | 'center' | 'right';
+  lineHeight: number;
+}
+
+interface FontFile {
+  face: import('harfbuzzjs').Face;
   upem: number;
+  info: FontInfo;
+  instances: Map<number, FontInstance>;
+}
+
+interface FontInstance {
+  font: import('harfbuzzjs').Font;
   ascender: number;
   descender: number;
-  lineGap: number;
   glyphs: Map<number, AtlasGlyph | null>;
 }
 
@@ -50,17 +76,27 @@ type HB = typeof import('harfbuzzjs');
 
 /**
  * Owns shaping (HarfBuzz) and the shared SDF glyph atlas (CPU side).
- * Renderers upload `atlas` when `atlasVersion` changes. Reconstructible at any time (context loss).
+ * The atlas is a stack of pages (`pages` layers of ATLAS_SIZE², contiguous in `atlas`). Renderers
+ * re-upload a page when its entry in `pageVersions` changes, and rebuild their array texture when
+ * `pages` grows. When every page is full the atlas is cleared and `generation` bumps: every cached
+ * layout from an older generation must be laid out again.
  */
 export class FontLibrary {
-  readonly atlas = new Uint8Array(ATLAS_SIZE * ATLAS_SIZE);
+  atlas = new Uint8Array(PAGE_BYTES);
   readonly atlasSize = ATLAS_SIZE;
+  pages = 1;
+  /** Bumps per page when its pixels change. */
+  pageVersions = [0];
+  /** Bumps on any atlas change (cheap "anything new?" check). */
   atlasVersion = 0;
+  generation = 0;
 
   private hb: Promise<HB> | null = null;
   private hbModule: HB | null = null;
-  private fonts = new Map<string, LoadedFont>();
+  private files = new Map<string, FontFile>();
   private loading = new Map<string, Promise<void>>();
+  private userFonts = new Map<string, { info: FontInfo; bytes: ArrayBuffer }>();
+  private failed = new Set<string>();
   private layoutCache = new Map<string, TextLayout>();
   private listeners = new Set<() => void>();
   private shelfX = 0;
@@ -73,50 +109,133 @@ export class FontLibrary {
     return () => this.listeners.delete(fn);
   }
 
+  private emit() {
+    this.listeners.forEach((l) => l());
+  }
+
+  /** Font metadata (bundled or registered user font). */
+  info(fontId: string): FontInfo | undefined {
+    return bundledFont(fontId) ?? this.userFonts.get(fontId)?.info;
+  }
+
+  userFontList(): FontInfo[] {
+    return [...this.userFonts.values()].map((u) => u.info);
+  }
+
   isLoaded(fontId: string): boolean {
-    return this.fonts.has(fontId);
+    return this.files.has(fontId);
+  }
+
+  /** True when the font can't be loaded (unknown id or broken file): layouts fall back to Inter. */
+  isMissing(fontId: string): boolean {
+    return this.failed.has(fontId) || (!bundledFont(fontId) && !this.userFonts.has(fontId));
+  }
+
+  /** Read a font file's family name and weight axis; null if HarfBuzz can't use it. */
+  async inspect(bytes: ArrayBuffer): Promise<{ family: string; weights: FontInfo['weights'] } | null> {
+    this.hb ??= import('harfbuzzjs');
+    const hb = await this.hb;
+    try {
+      const face = new hb.Face(new hb.Blob(bytes));
+      if (!face.upem || face.collectUnicodes().length === 0) return null;
+      const name = (id: number) => {
+        try {
+          return face.getName(id, 'en').trim();
+        } catch {
+          return '';
+        }
+      };
+      const family = (name(16) || name(1) || 'Uploaded font').slice(0, 80);
+      const w = face.getAxisInfos().wght;
+      return { family, weights: w ? { min: w.min, max: w.max, default: w.default } : null };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Make an uploaded font available under its asset id. */
+  registerUserFont(id: string, family: string, bytes: ArrayBuffer, weights: FontInfo['weights']) {
+    if (this.userFonts.has(id)) return;
+    this.userFonts.set(id, { info: { id, family, category: 'sans', weights, user: true }, bytes });
+    this.failed.delete(id);
+    this.emit();
   }
 
   load(fontId: string): Promise<void> {
     const existing = this.loading.get(fontId);
     if (existing) return existing;
-    const spec = BUNDLED_FONTS[fontId];
-    if (!spec) return Promise.reject(new Error(`Unknown font: ${fontId}`));
+    const info = this.info(fontId);
+    if (!info) return Promise.reject(new Error(`Unknown font: ${fontId}`));
     const p = (async () => {
       this.hb ??= import('harfbuzzjs');
-      const [hb, data] = await Promise.all([this.hb, fetch(spec.url).then((r) => r.arrayBuffer())]);
+      const user = this.userFonts.get(fontId);
+      const [hb, data] = await Promise.all([this.hb, user ? Promise.resolve(user.bytes) : fetch(info.url!).then((r) => r.arrayBuffer())]);
       const face = new hb.Face(new hb.Blob(data));
-      const font = new hb.Font(face);
-      const ext = font.hExtents();
-      this.fonts.set(fontId, {
-        font,
-        upem: face.upem,
-        ascender: ext.ascender,
-        descender: ext.descender,
-        lineGap: ext.lineGap,
-        glyphs: new Map(),
-      });
+      this.files.set(fontId, { face, upem: face.upem, info, instances: new Map() });
       this.hbModule = hb;
-      this.listeners.forEach((l) => l());
+      this.emit();
     })();
+    p.catch((e) => {
+      console.warn(`[glyphix] font ${fontId} failed to load`, e);
+      this.failed.add(fontId);
+      this.loading.delete(fontId);
+      this.emit();
+    });
     this.loading.set(fontId, p);
     return p;
   }
 
+  /** Load every font, falling back silently (missing fonts render in Inter). */
+  async loadAll(fontIds: Iterable<string>): Promise<void> {
+    const ids = new Set([DEFAULT_FONT_ID, ...fontIds]);
+    await Promise.all([...ids].filter((id) => !this.isMissing(id)).map((id) => this.load(id).catch(() => undefined)));
+  }
+
   /** Synchronous layout. Returns null (and starts loading) if the font isn't ready yet. */
-  layout(fontId: string, text: string, tracking: number, align: 'left' | 'center' | 'right', lineHeight = 1.15): TextLayout | null {
-    const key = `${fontId}\u0000${tracking}\u0000${align}\u0000${lineHeight}\u0000${text}`;
-    const cached = this.layoutCache.get(key);
-    if (cached) return cached;
-    const f = this.fonts.get(fontId);
-    if (!f || !this.hbModule) {
-      void this.load(fontId);
+  layout(spec: LayoutSpec): TextLayout | null {
+    const fontId = this.isMissing(spec.fontId) ? DEFAULT_FONT_ID : spec.fontId;
+    const file = this.files.get(fontId);
+    if (!file || !this.hbModule) {
+      void this.load(fontId).catch(() => undefined);
       return null;
     }
-    const hb = this.hbModule;
-    const lines = text.split('\n');
+    const weight = effectiveWeight(file.info, spec.weight);
+    const key = `${fontId}\u0000${weight}\u0000${spec.tracking}\u0000${spec.align}\u0000${spec.lineHeight}\u0000${spec.text}`;
+    const cached = this.layoutCache.get(key);
+    if (cached && cached.generation === this.generation) return cached;
+    // If the atlas fills up (and resets) part-way, glyphs placed before the reset are gone: lay out again.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const gen = this.generation;
+      const result = this.shape(file, weight, spec, fontId);
+      if (gen === this.generation) {
+        this.layoutCache.set(key, result);
+        return result;
+      }
+    }
+    console.warn('[glyphix] text needs more glyphs than the atlas holds');
+    return this.shape(file, weight, spec, fontId);
+  }
+
+  private instance(file: FontFile, weight: number): FontInstance {
+    let inst = file.instances.get(weight);
+    if (inst) return inst;
+    const hb = this.hbModule!;
+    const font = new hb.Font(file.face);
+    if (file.info.weights) font.setVariations([new hb.Variation('wght', weight)]);
+    const ext = font.hExtents();
+    inst = { font, ascender: ext.ascender, descender: ext.descender, glyphs: new Map() };
+    file.instances.set(weight, inst);
+    return inst;
+  }
+
+  private shape(file: FontFile, weight: number, spec: LayoutSpec, fontId: string): TextLayout {
+    const hb = this.hbModule!;
+    const f = this.instance(file, weight);
+    const upem = file.upem;
+    const lines = spec.text.split('\n');
     const shaped: { glyphs: LaidOutGlyph[]; width: number }[] = [];
-    for (const line of lines) {
+    let lineStart = 0;
+    lines.forEach((line, li) => {
       const buf = new hb.Buffer();
       buf.addText(line);
       buf.guessSegmentProperties();
@@ -126,31 +245,47 @@ export class FontLibrary {
       const glyphs: LaidOutGlyph[] = [];
       let pen = 0;
       for (let i = 0; i < infos.length; i++) {
-        const gid = infos[i]!.codepoint;
         const p = pos[i]!;
-        glyphs.push({ x: (pen + p.xOffset) / f.upem, y: p.yOffset / f.upem, glyph: this.glyph(f, gid) });
-        pen += p.xAdvance + tracking * f.upem;
+        const advance = p.xAdvance + spec.tracking * upem;
+        glyphs.push({
+          x: (pen + p.xOffset) / upem,
+          y: p.yOffset / upem,
+          advance: advance / upem,
+          glyph: this.glyph(f, upem, infos[i]!.codepoint),
+          cluster: lineStart + infos[i]!.cluster,
+          line: li,
+        });
+        pen += advance;
       }
-      const width = Math.max(0, pen - (infos.length ? tracking * f.upem : 0)) / f.upem;
+      const width = Math.max(0, pen - (infos.length ? spec.tracking * upem : 0)) / upem;
       shaped.push({ glyphs, width });
-    }
-    const asc = f.ascender / f.upem;
-    const desc = -f.descender / f.upem;
-    const lh = lineHeight * (asc + desc);
+      lineStart += line.length + 1;
+    });
+    const asc = f.ascender / upem;
+    const desc = -f.descender / upem;
+    const lh = spec.lineHeight * (asc + desc);
     const blockW = Math.max(0, ...shaped.map((l) => l.width));
     const blockH = asc + desc + lh * (lines.length - 1);
     const out: LaidOutGlyph[] = [];
     shaped.forEach((line, li) => {
-      const dx = align === 'left' ? -blockW / 2 : align === 'right' ? blockW / 2 - line.width : -line.width / 2;
+      const dx = spec.align === 'left' ? -blockW / 2 : spec.align === 'right' ? blockW / 2 - line.width : -line.width / 2;
       const baseline = blockH / 2 - asc - li * lh;
-      for (const g of line.glyphs) out.push({ x: g.x + dx, y: g.y + baseline, glyph: g.glyph });
+      for (const g of line.glyphs) out.push({ ...g, x: g.x + dx, y: g.y + baseline });
     });
-    const result: TextLayout = { glyphs: out, width: blockW, height: blockH };
-    this.layoutCache.set(key, result);
-    return result;
+    return { glyphs: out, width: blockW, height: blockH, fontId, generation: this.generation };
   }
 
-  private glyph(f: LoadedFont, gid: number): AtlasGlyph | null {
+  /** Atlas rect of one glyph of a loaded font (scramble charsets use this). */
+  glyphFor(fontId: string, weight: number, codepoint: number): { glyph: AtlasGlyph | null; advance: number } | null {
+    const file = this.files.get(fontId);
+    if (!file) return null;
+    const f = this.instance(file, effectiveWeight(file.info, weight));
+    const gid = f.font.glyph(codepoint);
+    if (gid === undefined) return null;
+    return { glyph: this.glyph(f, file.upem, gid), advance: f.font.glyphHAdvance(gid) / file.upem };
+  }
+
+  private glyph(f: FontInstance, upem: number, gid: number): AtlasGlyph | null {
     if (f.glyphs.has(gid)) return f.glyphs.get(gid)!;
     const ext = f.font.glyphExtents(gid);
     const path = f.font.glyphToPath(gid);
@@ -158,17 +293,25 @@ export class FontLibrary {
       f.glyphs.set(gid, null);
       return null;
     }
-    const s = ATLAS_EM_PX / f.upem;
+    const s = ATLAS_EM_PX / upem;
     const pad = ATLAS_SPREAD_PX;
     // Glyph bbox in font units (y-up): x ∈ [xBearing, xBearing+width], y ∈ [yBearing+height, yBearing].
     const x0 = ext.xBearing;
     const y1 = ext.yBearing;
     const w = Math.ceil(ext.width * s) + 2 * pad;
     const h = Math.ceil(-ext.height * s) + 2 * pad;
-    const slot = this.allocate(w, h);
+    let slot = this.allocate(w, h);
+    if (!slot && this.pages < ATLAS_MAX_PAGES) {
+      this.addPage();
+      slot = this.allocate(w, h);
+    }
     if (!slot) {
-      f.glyphs.set(gid, null);
-      return null;
+      this.reset();
+      slot = this.allocate(w, h);
+      if (!slot) {
+        f.glyphs.set(gid, null);
+        return null;
+      }
     }
 
     const ctx = this.rasterCtx(w, h);
@@ -180,23 +323,49 @@ export class FontLibrary {
     ctx.fill(new Path2D(path));
     const img = ctx.getImageData(0, 0, w, h).data;
     const sdf = coverageToSDF(img.subarray(3), w, h, ATLAS_SPREAD_PX, 4);
+    const base = slot.page * PAGE_BYTES;
     for (let row = 0; row < h; row++) {
-      this.atlas.set(sdf.subarray(row * w, row * w + w), (slot.y + row) * ATLAS_SIZE + slot.x);
+      this.atlas.set(sdf.subarray(row * w, row * w + w), base + (slot.y + row) * ATLAS_SIZE + slot.x);
     }
+    this.pageVersions[slot.page]!++;
     this.atlasVersion++;
 
     const g: AtlasGlyph = {
+      page: slot.page,
       ax: slot.x,
       ay: slot.y,
       aw: w,
       ah: h,
-      l: x0 / f.upem - pad / ATLAS_EM_PX,
-      t: y1 / f.upem + pad / ATLAS_EM_PX,
-      r: x0 / f.upem - pad / ATLAS_EM_PX + w / ATLAS_EM_PX,
-      b: y1 / f.upem + pad / ATLAS_EM_PX - h / ATLAS_EM_PX,
+      l: x0 / upem - pad / ATLAS_EM_PX,
+      t: y1 / upem + pad / ATLAS_EM_PX,
+      r: x0 / upem - pad / ATLAS_EM_PX + w / ATLAS_EM_PX,
+      b: y1 / upem + pad / ATLAS_EM_PX - h / ATLAS_EM_PX,
     };
     f.glyphs.set(gid, g);
     return g;
+  }
+
+  private addPage() {
+    const next = new Uint8Array(PAGE_BYTES * (this.pages + 1));
+    next.set(this.atlas);
+    this.atlas = next;
+    this.pages++;
+    this.pageVersions.push(0);
+    this.shelfX = this.shelfY = this.shelfH = 0;
+    this.atlasVersion++;
+  }
+
+  /** Empty the atlas (back to one page). Glyphs are re-rasterised on demand by the next layouts. */
+  private reset() {
+    console.info('[glyphix] glyph atlas full: rebuilding');
+    this.atlas = new Uint8Array(PAGE_BYTES);
+    this.pages = 1;
+    this.pageVersions = [this.pageVersions[0]! + 1];
+    this.shelfX = this.shelfY = this.shelfH = 0;
+    this.files.forEach((file) => file.instances.forEach((inst) => inst.glyphs.clear()));
+    this.layoutCache.clear();
+    this.generation++;
+    this.atlasVersion++;
   }
 
   private rasterCtx(w: number, h: number): OffscreenCanvasRenderingContext2D {
@@ -207,18 +376,15 @@ export class FontLibrary {
     return this.raster;
   }
 
-  /** Shelf packer. */
-  private allocate(w: number, h: number): { x: number; y: number } | null {
+  /** Shelf packer on the last page. */
+  private allocate(w: number, h: number): { page: number; x: number; y: number } | null {
     if (this.shelfX + w > ATLAS_SIZE) {
       this.shelfX = 0;
       this.shelfY += this.shelfH + 1;
       this.shelfH = 0;
     }
-    if (this.shelfY + h > ATLAS_SIZE) {
-      console.warn('[glyphix] glyph atlas full');
-      return null;
-    }
-    const slot = { x: this.shelfX, y: this.shelfY };
+    if (this.shelfY + h > ATLAS_SIZE) return null;
+    const slot = { page: this.pages - 1, x: this.shelfX, y: this.shelfY };
     this.shelfX += w + 1;
     this.shelfH = Math.max(this.shelfH, h);
     return slot;

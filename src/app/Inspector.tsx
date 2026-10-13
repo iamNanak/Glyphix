@@ -1,5 +1,9 @@
-import { useMemo, useRef } from 'react';
-import { AnimationSection } from './AnimationSection';
+import { useMemo, useRef, useState } from 'react';
+import { AnimationSection, ORDER_OPTIONS } from './AnimationSection';
+import { FontPicker } from './FontPicker';
+import { Switch } from '@/components/wensity/switch';
+import { fontLibrary } from '@/text/fontLibrary';
+import { effectiveWeight, namedWeights, WEIGHT_NAMES } from '@/text/fonts';
 import { CropSection, TransformSection } from './TransformSection';
 import {
   Easings,
@@ -357,13 +361,41 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
 function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
   // The hand-tuned animator applies only when no per-glyph enter preset is chosen.
   const anim = layer.motion.enter && isGlyphPreset(layer.motion.enter.preset) ? null : layer.animator;
+  const [fontError, setFontError] = useState<string | null>(null);
+  const info = fontLibrary.info(layer.fontId);
+  const weights = namedWeights(info);
+  const weight = effectiveWeight(info, layer.weight);
+  const glow = 'static' in layer.glow ? layer.glow.static : null;
   return (
     <>
       <Section title="Text">
         <Field label="Content">
           <textarea className={`${inputClass} min-h-16 resize-y`} value={layer.text} onChange={(e) => edit('Edit text', ['text'], e.target.value)} />
         </Field>
-        <SliderField label="Size" hint={`${layer.fontSize}px`} min={16} max={240} value={layer.fontSize} onValueChange={(v) => edit('Font size', ['fontSize'], v)} />
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-dim">Font</span>
+          <FontPicker
+            value={layer.fontId}
+            onChange={(id) => {
+              setFontError(null);
+              edit('Font', ['fontId'], id);
+            }}
+            onError={setFontError}
+          />
+          {fontError && (
+            <p role="alert" className="text-xs text-red-300">
+              {fontError}
+            </p>
+          )}
+        </div>
+        <SelectField
+          label="Weight"
+          value={String(weights.includes(weight) ? weight : weights[0])}
+          options={weights.map((w) => ({ value: String(w), label: `${WEIGHT_NAMES[w] ?? w} · ${w}` }))}
+          onValueChange={(v) => edit('Font weight', ['weight'], Number(v))}
+        />
+        <SliderField label="Size" hint={`${layer.fontSize}px`} min={12} max={400} value={layer.fontSize} onValueChange={(v) => edit('Font size', ['fontSize'], v)} />
+        <SliderField label="Line height" hint={`${layer.lineHeight.toFixed(2)}×`} min={0.7} max={2.2} step={0.01} value={layer.lineHeight} onValueChange={(v) => edit('Line height', ['lineHeight'], v)} />
         <SliderField label="Tracking" hint={`${layer.tracking.toFixed(2)}em`} min={-0.1} max={0.4} step={0.01} value={layer.tracking} onValueChange={(v) => edit('Tracking', ['tracking'], v)} />
         <Field label="Align">
           <Segmented
@@ -377,10 +409,94 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
             ]}
           />
         </Field>
+      </Section>
+
+      <AnimationSection layer={layer} edit={edit} />
+
+      <Section title="Fill">
+        <Segmented
+          label="Fill type"
+          value={layer.gradient ? 'gradient' : 'solid'}
+          onChange={(v) =>
+            edit('Fill', ['gradient'], v === 'gradient' ? { angle: 0, from: layer.color, to: [0.55, 0.85, 1, 1] } : null)
+          }
+          options={[
+            { value: 'solid', label: 'Solid' },
+            { value: 'gradient', label: 'Gradient' },
+          ]}
+        />
+        {layer.gradient ? (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="From">
+                <ColorField label="Gradient start colour" value={layer.gradient.from} onChange={(c) => edit('Gradient colour', ['gradient', 'from'], c)} />
+              </Field>
+              <Field label="To">
+                <ColorField label="Gradient end colour" value={layer.gradient.to} onChange={(c) => edit('Gradient colour', ['gradient', 'to'], c)} />
+              </Field>
+            </div>
+            <SliderField label="Angle" hint={`${layer.gradient.angle}°`} min={0} max={360} value={layer.gradient.angle} onValueChange={(v) => edit('Gradient angle', ['gradient', 'angle'], v)} />
+          </>
+        ) : (
+          <Field label="Colour">
+            <ColorField label="Text colour" value={layer.color} onChange={(c) => edit('Text colour', ['color'], c)} />
+          </Field>
+        )}
+      </Section>
+
+      <Section title="Outline">
+        <Switch
+          switchSize="sm"
+          checked={!!layer.outline}
+          onCheckedChange={(on) => edit('Outline', ['outline'], on ? { width: Math.max(1, Math.round(layer.fontSize * 0.04)), color: [0, 0, 0, 1] } : null)}
+          label="Outline"
+          labelClassName="text-xs text-dim"
+        />
+        {layer.outline && (
+          <>
+            <SliderField label="Width" hint={`${layer.outline.width}px`} min={1} max={Math.max(4, Math.round(layer.fontSize * 0.2))} value={layer.outline.width} onValueChange={(v) => edit('Outline width', ['outline', 'width'], v)} />
+            <Field label="Colour">
+              <ColorField label="Outline colour" value={layer.outline.color} onChange={(c) => edit('Outline colour', ['outline', 'color'], c)} />
+            </Field>
+          </>
+        )}
+      </Section>
+
+      <Section title="Shadow">
+        <Switch
+          switchSize="sm"
+          checked={!!layer.shadow}
+          onCheckedChange={(on) =>
+            edit('Text shadow', ['shadow'], on ? { offsetX: 0, offsetY: Math.round(layer.fontSize * 0.05), blur: Math.round(layer.fontSize * 0.08), color: [0, 0, 0, 0.5] } : null)
+          }
+          label="Text shadow"
+          labelClassName="text-xs text-dim"
+        />
+        {layer.shadow && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <SliderField label="X" hint={`${layer.shadow.offsetX}px`} min={-60} max={60} value={layer.shadow.offsetX} onValueChange={(v) => edit('Shadow X', ['shadow', 'offsetX'], v)} />
+              <SliderField label="Y" hint={`${layer.shadow.offsetY}px`} min={-60} max={60} value={layer.shadow.offsetY} onValueChange={(v) => edit('Shadow Y', ['shadow', 'offsetY'], v)} />
+            </div>
+            <SliderField label="Softness" hint={`${layer.shadow.blur}px`} min={0} max={Math.max(4, Math.round(layer.fontSize * 0.2))} value={layer.shadow.blur} onValueChange={(v) => edit('Shadow softness', ['shadow', 'blur'], v)} />
+            <Field label="Colour">
+              <ColorField label="Shadow colour" alpha value={layer.shadow.color} onChange={(c) => edit('Shadow colour', ['shadow', 'color'], c)} />
+            </Field>
+          </>
+        )}
+      </Section>
+
+      <Section title="Glow">
+        {glow === null ? (
+          <p className="text-xs text-dim">Glow is animated in this project (keyframes).</p>
+        ) : (
+          <SliderField label="Strength" hint={`${Math.round(glow * 100)}%`} min={0} max={1} step={0.01} value={glow} onValueChange={(v) => edit('Glow', ['glow'], { static: v })} />
+        )}
         <Field label="Colour">
-          <ColorField value={layer.color} onChange={(c) => edit('Text colour', ['color'], c)} />
+          <ColorField label="Glow colour" value={layer.glowColor} onChange={(c) => edit('Glow colour', ['glowColor'], c)} />
         </Field>
       </Section>
+
       <TransformSection layer={layer} edit={edit} />
       {anim && (
         <Section title="Custom glyph animation">
@@ -393,18 +509,17 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
           <SelectField<StaggerOrder>
             label="Order"
             value={anim.order}
-            options={(['forward', 'reverse', 'center', 'random'] as const).map((o) => ({ value: o, label: o[0]!.toUpperCase() + o.slice(1) }))}
+            options={ORDER_OPTIONS}
             onValueChange={(o) => edit('Stagger order', ['animator', 'order'], o)}
           />
           <SliderField label="Stagger" hint={`${Math.round(anim.stagger * 1000)}ms`} min={0} max={0.2} step={0.005} value={anim.stagger} onValueChange={(v) => edit('Stagger', ['animator', 'stagger'], v)} />
           <SliderField label="Duration" hint={`${anim.duration.toFixed(2)}s`} min={0.1} max={2} step={0.05} value={anim.duration} onValueChange={(v) => edit('Duration', ['animator', 'duration'], v)} />
-          <SliderField label="Rise from" hint={`${anim.from.offsetY}px`} min={-200} max={200} value={anim.from.offsetY} onValueChange={(v) => edit('Rise', ['animator', 'from', 'offsetY'], v)} />
-          <SliderField label="Rotate from" hint={`${anim.from.rotation}°`} min={-90} max={90} value={anim.from.rotation} onValueChange={(v) => edit('Rotate', ['animator', 'from', 'rotation'], v)} />
-          <SliderField label="Scale from" hint={`${anim.from.scale.toFixed(2)}×`} min={0} max={3} step={0.05} value={anim.from.scale} onValueChange={(v) => edit('Scale', ['animator', 'from', 'scale'], v)} />
+          <SliderField label="Rise from" hint={`${anim.pose.offsetY}px`} min={-200} max={200} value={anim.pose.offsetY} onValueChange={(v) => edit('Rise', ['animator', 'pose', 'offsetY'], v)} />
+          <SliderField label="Rotate from" hint={`${anim.pose.rotation}°`} min={-90} max={90} value={anim.pose.rotation} onValueChange={(v) => edit('Rotate', ['animator', 'pose', 'rotation'], v)} />
+          <SliderField label="Scale from" hint={`${anim.pose.scaleX.toFixed(2)}×`} min={0} max={3} step={0.05} value={anim.pose.scaleX} onValueChange={(v) => edit('Scale', ['animator', 'pose'], { ...anim.pose, scaleX: v, scaleY: v })} />
           <SliderField label="Seed" hint={String(anim.seed)} min={0} max={100} value={anim.seed} onValueChange={(v) => edit('Seed', ['animator', 'seed'], v)} />
         </Section>
       )}
-      <AnimationSection layer={layer} edit={edit} />
     </>
   );
 }

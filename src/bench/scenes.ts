@@ -1,4 +1,4 @@
-import { createDemoDoc, Easings, type Doc, type ImageLayer, type TextLayer } from '@/doc';
+import { createDemoDoc, defaultEnter, defaultExit, defaultLoop, Easings, REST_POSE, type Doc, type ImageLayer, type TextLayer } from '@/doc';
 import { assetStore } from '@/assets/assetStore';
 import { createDemoScreenshot } from '@/assets/demoScreenshot';
 
@@ -29,7 +29,7 @@ function textOfLength(n: number, perLine: number): string {
   return lines.join('\n');
 }
 
-function glyphScene(n: number): Doc {
+function glyphScene(n: number, kinetic = false): Doc {
   const doc = createDemoDoc();
   doc.name = `${n} glyphs`;
   const headline = doc.comp.layers.find((l) => l.id === 'headline') as TextLayer;
@@ -38,14 +38,27 @@ function glyphScene(n: number): Doc {
   headline.transform.y = { static: 540 };
   headline.align = 'center';
   headline.animator = {
+    unit: 'glyph',
+    order: 'random',
     start: 0.1,
     duration: 0.8,
     stagger: 3 / n,
-    order: 'random',
+    falloff: Easings.linear,
     seed: 3,
     easing: Easings.easeOutBack,
-    from: { offsetX: 0, offsetY: 40, scale: 0.2, rotation: -30, opacity: 0 },
+    pose: { ...REST_POSE, offsetY: 40, scaleX: 0.2, scaleY: 0.2, rotation: -30, opacity: 0 },
   };
+  if (kinetic) {
+    // Enter + exit + emphasis running at once: the Phase 2 stress case.
+    headline.animator = null;
+    headline.motion = {
+      enter: { ...defaultEnter('flip-up', 0), duration: 2.5 },
+      exit: { ...defaultExit('scatter-out'), duration: 2.5 },
+      loop: defaultLoop('wave', doc.comp),
+    };
+    headline.outline = { width: 2, color: [0, 0, 0, 1] };
+    headline.shadow = { offsetX: 0, offsetY: 4, blur: 6, color: [0, 0, 0, 0.5] };
+  }
   doc.comp.layers = doc.comp.layers.filter((l) => l.id !== 'shot');
   return doc;
 }
@@ -91,12 +104,13 @@ export const SCENES: Record<string, { label: string; build: () => Doc }> = {
   demo: { label: 'Demo', build: () => createDemoDoc() },
   g300: { label: '300 glyphs', build: () => glyphScene(300) },
   g1000: { label: '1000 glyphs', build: () => glyphScene(1000) },
+  k300: { label: '300 glyphs, enter + exit + wave', build: () => glyphScene(300, true) },
   big: { label: '4K + 10 layers', build: bigScene },
 };
 
 /** Rough VRAM estimate in MB: textures (with mips) + glyph atlas + drawing buffer. */
 export function estimateVramMB(doc: Doc, canvasPixels: number): number {
-  let bytes = 2048 * 2048; // R8 glyph atlas
+  let bytes = 2048 * 2048; // R8 glyph atlas, first page
   const seen = new Set<string>();
   for (const l of doc.comp.layers) {
     if (l.type !== 'image' || seen.has(l.assetId)) continue;

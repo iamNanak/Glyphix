@@ -6,6 +6,9 @@ import { measureText } from '@/editor/Overlay';
 import { frameBarHeight } from '@/styling/frames';
 import { assetStore } from '@/assets/assetStore';
 import { useSaveStatus } from '@/persistence/autosave';
+import { fontLibrary } from '@/text/fontLibrary';
+import { createBackend } from '@/render/backend';
+import { renderFrameBitmap } from '@/export/exporter';
 
 declare global {
   interface Window {
@@ -22,6 +25,10 @@ window.__glyphix = {
   /** Asset ids currently decoded in memory. */
   assets: () => assetStore.ids(),
   saveState: () => useSaveStatus.getState().state,
+  /** The app's font library instance (test scripts must not import their own copy). */
+  fonts: fontLibrary,
+  /** Renderer + frame capture from the app's own module graph (same font/asset singletons). */
+  render: { createBackend, renderFrameBitmap },
   /** Raw store access for experiments (dev only). */
   editor: useEditor,
   setTime: (t: number) => useEditor.getState().setTime(t),

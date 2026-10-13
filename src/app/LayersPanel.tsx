@@ -28,7 +28,7 @@ export function LayersPanel() {
   return (
     <aside className="flex min-h-0 flex-col border-r border-line bg-panel" aria-label="Layers">
       <h2 className="px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-dim uppercase">Layers</h2>
-      <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2" role="listbox" aria-label="Layer list">
+      <ul className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2" aria-label="Layer list">
         {layers
           .map((layer, index) => ({ layer, index }))
           .reverse()
@@ -39,8 +39,6 @@ export function LayersPanel() {
             return (
               <li
                 key={layer.id}
-                role="option"
-                aria-selected={isSel}
                 draggable={!fixed && renaming !== layer.id}
                 onDragStart={(e) => {
                   setDragId(layer.id);
@@ -73,6 +71,7 @@ export function LayersPanel() {
                 <div className={`group flex items-center gap-1.5 rounded-md px-2 py-1.5 ${isSel ? 'bg-accent/20 text-white' : 'text-zinc-300 hover:bg-white/5'}`}>
                   <button
                     type="button"
+                    aria-pressed={isSel}
                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     onClick={() => s.select(layer.id)}
                     onDoubleClick={() => !fixed && setRenaming(layer.id)}

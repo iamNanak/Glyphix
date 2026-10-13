@@ -1,8 +1,8 @@
 // .glyphix project files: a zip with project.json (the document + an asset manifest) and the
-// image files under assets/. Opened files are untrusted input: sizes, paths and ids are validated
+// image and font files under assets/. Opened files are untrusted input: sizes, paths and ids are validated
 // and the document goes through migrate() like everything else.
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { migrate, referencedAssets, SCHEMA_VERSION, type Doc } from '@/doc';
+import { FONT_ASSET_PREFIX, migrate, referencedAssets, SCHEMA_VERSION, type Doc } from '@/doc';
 import { assetBlob } from '@/assets/assetStore';
 
 export const PROJECT_EXTENSION = '.glyphix';
@@ -12,7 +12,15 @@ export const PROJECT_MIME = 'application/x-glyphix+zip';
 const MAX_UNZIPPED_BYTES = 1024 * 1024 * 1024;
 const ID_PATTERN = /^[A-Za-z0-9_.-]{1,80}$/;
 
-const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif' };
+const EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/avif': 'avif',
+  'font/ttf': 'ttf',
+  'font/otf': 'otf',
+};
 const MIME_BY_EXT = Object.fromEntries(Object.entries(EXT).map(([m, e]) => [e, m]));
 
 interface Manifest {
@@ -28,9 +36,9 @@ export async function writeProjectFile(doc: Doc): Promise<Blob> {
   for (const id of referencedAssets(doc)) {
     const blob = await assetBlob(id);
     if (!blob) continue; // missing in this session: the document still references it
-    const type = EXT[blob.type] ? blob.type : 'image/png';
+    const type = EXT[blob.type] ? blob.type : id.startsWith(FONT_ASSET_PREFIX) ? 'font/ttf' : 'image/png';
     const path = `assets/${id}.${EXT[type]}`;
-    // Images are already compressed: store them without re-deflating.
+    // Images are already compressed: store them without re-deflating. Fonts do compress.
     files[path] = new Uint8Array(await blob.arrayBuffer());
     assets.push({ id, path, type });
   }
@@ -38,7 +46,7 @@ export async function writeProjectFile(doc: Doc): Promise<Blob> {
   const zipped = zipSync(
     {
       'project.json': [strToU8(JSON.stringify(manifest, null, 2)), { level: 6 }],
-      ...Object.fromEntries(Object.entries(files).map(([p, d]) => [p, [d, { level: 0 }] as [Uint8Array, { level: 0 }]])),
+      ...Object.fromEntries(Object.entries(files).map(([p, d]) => [p, [d, { level: /\.(ttf|otf)$/.test(p) ? 6 : 0 }] as [Uint8Array, { level: 0 | 6 }]])),
     },
     { mtime: new Date('1980-01-01T00:00:00') }, // fixed: same project → identical bytes
   );

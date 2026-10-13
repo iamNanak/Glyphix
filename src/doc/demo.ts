@@ -1,6 +1,6 @@
 import { Easings } from './easing';
 import { NO_MOTION } from './motion';
-import { FULL_CROP, NO_FRAME, NO_TILT, SCHEMA_VERSION, type Doc, type TextLayer } from './types';
+import { FULL_CROP, NO_FRAME, NO_TILT, REST_POSE, SCHEMA_VERSION, type Doc, type TextLayer } from './types';
 
 export const DEMO_SCREENSHOT_ASSET = 'demo-screenshot';
 
@@ -65,8 +65,13 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           locked: false,
           text: headline,
           fontId: 'inter',
+          weight: 400,
           fontSize: 96,
+          lineHeight: 1.15,
           color: [1, 1, 1, 1],
+          gradient: null,
+          outline: null,
+          shadow: null,
           align: 'center',
           tracking: -0.02,
           opacity: { static: 1 },
@@ -75,13 +80,15 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           transform: { x: { static: 960 }, y: { static: 150 }, scale: { static: 1 }, rotation: { static: 0 } },
           motion: NO_MOTION,
           animator: {
+            unit: 'glyph',
+            order: 'forward',
             start: 0.3,
             duration: 0.7,
             stagger: 0.04,
-            order: 'forward',
+            falloff: Easings.linear,
             seed: 7,
             easing: Easings.easeOutBack,
-            from: { offsetX: 0, offsetY: 60, scale: 0.4, rotation: -12, opacity: 0 },
+            pose: { ...REST_POSE, offsetY: 60, scaleX: 0.4, scaleY: 0.4, rotation: -12, opacity: 0 },
           },
         },
       ],
@@ -106,7 +113,7 @@ export function createBlankDoc(id: string): Doc {
           animator: null,
           glow: { static: 0.3 },
           transform: { ...headline.transform, y: { static: 540 } },
-          motion: { enter: { preset: 'rise', start: 0.2, duration: 1, easing: Easings.easeOutBack }, loop: null },
+          motion: { enter: { preset: 'rise', start: 0.2, duration: 1, easing: Easings.easeOutBack }, exit: null, loop: null },
         },
       ],
     },

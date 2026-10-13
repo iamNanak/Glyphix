@@ -1,20 +1,26 @@
 import { ease } from './easing';
 import { seededPermutation } from './random';
 import { frameBarHeight } from './frame';
-import { glyphAnimatorFor, motionModifiers, waveFor, type Modifiers, type Wave } from './motion';
+import { exitStart, isGlyphPreset, maxRank, glyphAnimatorFor, glyphExitFor, glyphLoopFor, motionModifiers, unitCount, type GlyphLoop, type Modifiers } from './motion';
 import type {
   Color,
   CropRect,
   Doc,
   Easing,
   GlyphAnimator,
+  GlyphUnit,
   BackgroundFill,
   Border,
   Frame,
   Prop,
   Shadow,
   StaggerOrder,
+  TextGradient,
+  TextOutline,
+  TextLayer,
+  TextShadow,
   Transform,
+  Comp,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -57,17 +63,23 @@ export interface TextItem extends ResolvedTransform {
   id: string;
   text: string;
   fontId: string;
+  weight: number;
   fontSize: number;
+  lineHeight: number;
   color: Color;
+  gradient: TextGradient | null;
+  outline: TextOutline | null;
+  shadow: TextShadow | null;
   align: 'left' | 'center' | 'right';
   tracking: number;
   opacity: number;
   glow: number;
   glowColor: Color;
-  /** Static animator template; per-glyph expansion happens in the renderer (GPU). */
-  animator: GlyphAnimator | null;
-  /** Continuous per-glyph wave (GPU), or null. */
-  wave: Wave | null;
+  /** Static animator templates; per-glyph expansion happens in the renderer (GPU). */
+  enter: GlyphAnimator | null;
+  exit: GlyphAnimator | null;
+  /** Continuous per-glyph emphasis loop (GPU), or null. */
+  loop: GlyphLoop | null;
 }
 
 export type RenderItem = BackgroundItem | ImageItem | TextItem;
@@ -149,21 +161,27 @@ export function evaluate(doc: Doc, t: number): RenderList {
       }
       case 'text': {
         const m = motionModifiers(layer.motion, t, doc.comp, 'text');
-        const enter = layer.motion.enter;
+        const { enter, exit, loop } = layer.motion;
         items.push({
           kind: 'text',
           id: layer.id,
           text: layer.text,
           fontId: layer.fontId,
+          weight: layer.weight,
           fontSize: layer.fontSize,
+          lineHeight: layer.lineHeight,
           color: layer.color,
+          gradient: layer.gradient,
+          outline: layer.outline,
+          shadow: layer.shadow,
           align: layer.align,
           tracking: layer.tracking,
           opacity: opacity * m.opacity,
           glow: sampleProp(layer.glow, t),
           glowColor: layer.glowColor,
-          animator: (enter && glyphAnimatorFor(enter, layer.text)) ?? layer.animator,
-          wave: waveFor(layer.motion.loop, layer.fontSize),
+          enter: (enter && glyphAnimatorFor(enter, layer.text)) ?? layer.animator,
+          exit: exit && glyphExitFor(exit, layer.text, doc.comp),
+          loop: glyphLoopFor(loop, layer.fontSize),
           ...applyModifiers(resolveTransform(layer.transform, t), m),
         });
         break;
@@ -178,16 +196,21 @@ export function evaluate(doc: Doc, t: number): RenderList {
 // CPU versions are the reference (tests, hit-testing, future CPU fallback).
 // ---------------------------------------------------------------------------
 
-/** Stagger rank for each glyph index. rank 0 starts first. */
+/** Stagger rank for each unit index. rank 0 starts first. */
 export function glyphRanks(count: number, order: StaggerOrder, seed: number): number[] {
   switch (order) {
     case 'forward':
       return Array.from({ length: count }, (_, i) => i);
     case 'reverse':
       return Array.from({ length: count }, (_, i) => count - 1 - i);
-    case 'center': {
+    case 'center':
+    case 'edges': {
       const mid = (count - 1) / 2;
-      return Array.from({ length: count }, (_, i) => Math.round(Math.abs(i - mid)));
+      const far = Math.round(mid);
+      return Array.from({ length: count }, (_, i) => {
+        const d = Math.round(Math.abs(i - mid));
+        return order === 'center' ? d : far - d;
+      });
     }
     case 'random': {
       const perm = seededPermutation(count, seed);
@@ -198,11 +221,61 @@ export function glyphRanks(count: number, order: StaggerOrder, seed: number): nu
   }
 }
 
-/** Linear (un-eased) progress 0..1 of one glyph at comp time t. */
-export function glyphProgress(anim: GlyphAnimator, rank: number, t: number): number {
-  if (anim.duration <= 0) return 1;
-  const p = (t - anim.start - anim.stagger * rank) / anim.duration;
+
+/**
+ * Start delay (s) of each unit: stagger · lastRank · falloff(rank / lastRank).
+ * A linear falloff gives evenly spaced starts, exactly `stagger` apart.
+ */
+export function unitDelays(count: number, anim: Pick<GlyphAnimator, 'order' | 'seed' | 'stagger' | 'falloff'>): number[] {
+  const ranks = glyphRanks(count, anim.order, anim.seed);
+  const last = maxRank(count, anim.order);
+  if (last <= 0) return ranks.map(() => 0);
+  const span = anim.stagger * last;
+  return ranks.map((r) => span * ease(anim.falloff, r / last));
+}
+
+/**
+ * Which unit each glyph belongs to. `glyphs` are the drawn glyphs in visual order with their
+ * source character index (cluster) and line. Words are runs of non-whitespace on a line.
+ */
+export function assignUnits(text: string, glyphs: { cluster: number; line: number }[], unit: GlyphUnit): { units: number[]; count: number } {
+  if (unit === 'glyph') return { units: glyphs.map((_, i) => i), count: glyphs.length };
+  const keyOf = (g: { cluster: number; line: number }) => {
+    if (unit === 'line') return g.line;
+    // Word = index of the whitespace-separated run that contains this character.
+    let start = g.cluster;
+    while (start > 0 && !/\s/.test(text[start - 1]!)) start--;
+    return start;
+  };
+  const ids = new Map<number, number>();
+  const units = glyphs.map((g) => {
+    const k = keyOf(g);
+    let id = ids.get(k);
+    if (id === undefined) {
+      id = ids.size;
+      ids.set(k, id);
+    }
+    return id;
+  });
+  return { units, count: ids.size };
+}
+
+/** Linear (un-eased) progress 0..1 of a unit with start delay `delay`, at comp time t. */
+export function unitProgress(anim: Pick<GlyphAnimator, 'start' | 'duration'>, delay: number, t: number): number {
+  if (anim.duration <= 0) return t >= anim.start + delay ? 1 : 0;
+  const p = (t - anim.start - delay) / anim.duration;
   return Math.min(1, Math.max(0, p));
+}
+
+/** Linear progress of the unit with stagger rank `rank` (linear falloff). */
+export function glyphProgress(anim: Pick<GlyphAnimator, 'start' | 'duration' | 'stagger'>, rank: number, t: number): number {
+  return unitProgress(anim, anim.stagger * rank, t);
+}
+
+/** How far a unit is from rest: enter animators go 1 → 0, exit animators 0 → 1. */
+export function awayness(anim: GlyphAnimator, delay: number, t: number, kind: 'enter' | 'exit'): number {
+  const e = ease(anim.easing, unitProgress(anim, delay, t));
+  return kind === 'enter' ? 1 - e : e;
 }
 
 export const EASING_LUT_SIZE = 256;
@@ -214,7 +287,38 @@ export function easingLUT(e: Easing, size = EASING_LUT_SIZE): Float32Array {
   return lut;
 }
 
-/** Last moment any glyph is still animating; useful for auto comp duration. */
-export function animatorEnd(anim: GlyphAnimator, glyphCount: number): number {
-  return anim.start + anim.stagger * Math.max(0, glyphCount - 1) + anim.duration;
+/** Last moment any unit is still animating; useful for auto comp duration. */
+export function animatorEnd(anim: GlyphAnimator, unitCount: number): number {
+  const delays = unitDelays(Math.max(1, unitCount), anim);
+  return anim.start + Math.max(...delays) + anim.duration;
+}
+
+/** A moment when a text layer is fully at rest (entered, not yet exiting), for editing. */
+export function restTime(layer: TextLayer, comp: Pick<Comp, 'duration'>): number {
+  const { enter, exit } = layer.motion;
+  // Enter presets (whole-layer or per glyph) finish exactly at start + duration.
+  let t = enter ? enter.start + enter.duration : 0;
+  const custom = layer.animator;
+  if (custom && !(enter && isGlyphPreset(enter.preset))) t = Math.max(t, animatorEnd(custom, unitCount(layer.text, custom.unit)));
+  if (exit) t = Math.min(t, exitStart(exit, comp) - 1e-3);
+  return Math.min(comp.duration, Math.max(0, t));
+}
+
+/**
+ * A representative moment for thumbnails: after entrances have finished and before exits begin
+ * (the end of the comp when nothing exits).
+ */
+export function posterTime(doc: Doc): number {
+  const { comp } = doc;
+  let entered = 0;
+  let exiting = comp.duration;
+  for (const l of comp.layers) {
+    if (l.type === 'background' || !l.visible) continue;
+    const { enter, exit } = l.motion;
+    if (l.type === 'text') entered = Math.max(entered, Math.min(comp.duration, restTime({ ...l, motion: { ...l.motion, exit: null } }, comp)));
+    else if (enter) entered = Math.max(entered, enter.start + enter.duration);
+    if (exit) exiting = Math.min(exiting, exitStart(exit, comp));
+  }
+  if (exiting >= comp.duration) return Math.max(0, comp.duration - 0.05);
+  return Math.max(0, exiting > entered ? (entered + exiting) / 2 : exiting - 0.05);
 }

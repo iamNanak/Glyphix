@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { animatorEnd, offsetProp, sampleProp, scaleProp, type Doc, type ImageLayer, type Layer, type Patch, type TextLayer } from '@/doc';
+import { restTime, offsetProp, sampleProp, scaleProp, type Doc, type ImageLayer, type Layer, type Patch, type TextLayer } from '@/doc';
 import { fontLibrary } from '@/text/fontLibrary';
 import { layerIndex, useEditor } from '@/app/store';
 import { toComp, toScreen, useView } from './viewStore';
@@ -23,7 +23,7 @@ import {
 import { frameBarHeight } from '@/styling/frames';
 
 export const measureText: MeasureText = (l) => {
-  const layout = fontLibrary.layout(l.fontId, l.text, l.tracking, l.align);
+  const layout = fontLibrary.layout(l);
   return layout ? { width: layout.width * l.fontSize, height: layout.height * l.fontSize } : null;
 };
 
@@ -348,10 +348,7 @@ export function startTextEdit(layer: TextLayer) {
   s.select(layer.id);
   s.setPlaying(false);
   // Show the text at rest while editing.
-  if (layer.animator) {
-    const glyphs = layer.text.replace(/\s/g, '').length;
-    s.setTime(Math.min(s.doc.comp.duration, animatorEnd(layer.animator, glyphs)));
-  }
+  s.setTime(restTime(layer, s.doc.comp));
   s.setEditingText(layer.id);
 }
 

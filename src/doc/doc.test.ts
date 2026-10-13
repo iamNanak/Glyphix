@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { cubicBezier, ease, Easings, spring } from './easing';
 import { createDemoDoc } from './demo';
-import { easingLUT, evaluate, glyphProgress, glyphRanks, sampleProp } from './evaluate';
+import { assignUnits, awayness, easingLUT, evaluate, glyphProgress, glyphRanks, sampleProp, unitDelays } from './evaluate';
 import { History, makeInsert, makeMove, makeRemove, makeSet } from './history';
 import { offsetProp } from './props';
 import { seededPermutation } from './random';
-import type { Doc, GlyphAnimator } from './types';
+import { REST_POSE, type Doc, type GlyphAnimator } from './types';
 
 describe('easing', () => {
   it('bezier endpoints and linear identity', () => {
@@ -52,8 +52,8 @@ describe('evaluate', () => {
 
 describe('glyph animator', () => {
   const anim: GlyphAnimator = {
-    start: 0.5, duration: 1, stagger: 0.1, order: 'forward', seed: 1, easing: Easings.linear,
-    from: { offsetX: 0, offsetY: 10, scale: 0, rotation: 0, opacity: 0 },
+    unit: 'glyph', order: 'forward', start: 0.5, duration: 1, stagger: 0.1, falloff: Easings.linear, seed: 1, easing: Easings.linear,
+    pose: { ...REST_POSE, offsetY: 10, scaleX: 0, scaleY: 0, opacity: 0 },
   };
   it('staggers by rank', () => {
     expect(glyphProgress(anim, 0, 1)).toBeCloseTo(0.5);
@@ -63,6 +63,7 @@ describe('glyph animator', () => {
   it('ranks are permutations / symmetric', () => {
     expect(glyphRanks(4, 'reverse', 0)).toEqual([3, 2, 1, 0]);
     expect(glyphRanks(5, 'center', 0)).toEqual([2, 1, 0, 1, 2]);
+    expect(glyphRanks(5, 'edges', 0)).toEqual([0, 1, 2, 1, 0]);
     const r = glyphRanks(50, 'random', 42);
     expect([...r].sort((a, b) => a - b)).toEqual(Array.from({ length: 50 }, (_, i) => i));
     expect(glyphRanks(50, 'random', 42)).toEqual(r);
@@ -70,6 +71,28 @@ describe('glyph animator', () => {
   it('seeded permutation is stable across runs', () => {
     expect(seededPermutation(6, 123)).toEqual(seededPermutation(6, 123));
     expect(seededPermutation(6, 123)).not.toEqual(seededPermutation(6, 124));
+  });
+  it('linear falloff spaces starts exactly `stagger` apart; other falloffs keep the ends', () => {
+    expect(unitDelays(4, anim)).toEqual([0, 0.1, 0.2, 0.30000000000000004]);
+    const eased = unitDelays(5, { ...anim, falloff: Easings.easeInCubic });
+    expect(eased[0]).toBe(0);
+    expect(eased[4]).toBeCloseTo(0.4);
+    expect(eased[2]!).toBeLessThan(0.2); // ease-in: early units bunch up
+    expect(unitDelays(5, { ...anim, order: 'center' })).toEqual([0.2, 0.1, 0, 0.1, 0.2]);
+  });
+  it('awayness: enter goes 1 → 0, exit 0 → 1', () => {
+    expect(awayness(anim, 0, 0, 'enter')).toBe(1);
+    expect(awayness(anim, 0, 5, 'enter')).toBe(0);
+    expect(awayness(anim, 0, 0, 'exit')).toBe(0);
+    expect(awayness(anim, 0, 1, 'exit')).toBeCloseTo(0.5);
+  });
+  it('units: glyphs, words and lines', () => {
+    const text = 'Ship it\nnow';
+    // Drawn glyphs (no spaces/newlines): S h i p i t n o w
+    const glyphs = [0, 1, 2, 3, 5, 6, 8, 9, 10].map((cluster) => ({ cluster, line: cluster > 7 ? 1 : 0 }));
+    expect(assignUnits(text, glyphs, 'glyph').count).toBe(9);
+    expect(assignUnits(text, glyphs, 'word')).toEqual({ units: [0, 0, 0, 0, 1, 1, 2, 2, 2], count: 3 });
+    expect(assignUnits(text, glyphs, 'line')).toEqual({ units: [0, 0, 0, 0, 0, 0, 1, 1, 1], count: 2 });
   });
   it('LUT matches ease()', () => {
     const lut = easingLUT(Easings.easeOutBack, 11);

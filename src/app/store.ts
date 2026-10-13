@@ -10,7 +10,9 @@ import {
   offsetProp,
   type Doc,
   type HistoryEntry,
+  createTextLayer,
   type Layer,
+  type Motion,
   type Patch,
 } from '@/doc';
 
@@ -27,6 +29,8 @@ interface EditorState {
   editingTextId: string | null;
   canUndo: boolean;
   canRedo: boolean;
+  /** Hover preview of a motion preset on one layer; shown on the canvas, never saved. */
+  preview: { layerId: string; motion: Motion } | null;
 
   commit(entry: HistoryEntry): void;
   /** Convenience: set paths on the doc as one undoable step. */
@@ -44,6 +48,9 @@ interface EditorState {
   select(id: string | null): void;
   setCrop(id: string | null): void;
   setEditingText(id: string | null): void;
+  setPreview(preview: { layerId: string; motion: Motion } | null): void;
+  /** Add a text layer at the centre of the comp and select it. */
+  addText(): void;
 
   // Layer operations (all undoable)
   removeLayer(id: string): void;
@@ -72,6 +79,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   selectedId: 'headline',
   cropId: null,
   editingTextId: null,
+  preview: null,
 
   commit(entry) {
     history.commit(entry);
@@ -95,15 +103,22 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   loadDoc(doc) {
     history.reset(doc);
-    set({ ...fromHistory(), time: 0, selectedId: null, cropId: null, editingTextId: null });
+    set({ ...fromHistory(), time: 0, selectedId: null, cropId: null, editingTextId: null, preview: null });
   },
   setTime: (time) => set({ time }),
   setPlaying: (playing) => set({ playing }),
   setLoop: (loop) => set({ loop }),
   setForceWebGL: (forceWebGL) => set({ forceWebGL }),
-  select: (selectedId) => set((s) => ({ selectedId, cropId: s.cropId === selectedId ? s.cropId : null, editingTextId: null })),
+  select: (selectedId) => set((s) => ({ selectedId, cropId: s.cropId === selectedId ? s.cropId : null, editingTextId: null, preview: null })),
   setCrop: (cropId) => set({ cropId, selectedId: cropId ?? get().selectedId }),
   setEditingText: (editingTextId) => set({ editingTextId }),
+  setPreview: (preview) => set({ preview }),
+  addText() {
+    const { doc } = get();
+    const layer = createTextLayer(doc.comp);
+    get().commit(makeInsert(LAYERS, doc.comp.layers.length, layer, 'Add text'));
+    set({ selectedId: layer.id });
+  },
 
   removeLayer(id) {
     const { doc } = get();
@@ -155,3 +170,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (i >= 0 && name.trim()) get().set('Rename layer', [{ path: [...LAYERS, i, 'name'], value: name.trim() }]);
   },
 }));
+
+/** The document as the canvas shows it: the real doc, plus any hover preview of a motion preset. */
+export function previewDoc(doc: Doc, preview: EditorState['preview']): Doc {
+  if (!preview) return doc;
+  const i = layerIndex(doc, preview.layerId);
+  const layer = doc.comp.layers[i];
+  if (!layer || layer.type === 'background') return doc;
+  const layers = doc.comp.layers.slice();
+  layers[i] = { ...layer, motion: preview.motion };
+  return { ...doc, comp: { ...doc.comp, layers } };
+}

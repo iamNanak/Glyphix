@@ -1,6 +1,7 @@
 // Projects in IndexedDB: documents + the image files they reference.
 import { migrate, referencedAssets, type Doc } from '@/doc';
 import { assetBlob, assetStore, loadAssetBlob } from '@/assets/assetStore';
+import { fontBlob } from '@/assets/fontAssets';
 import { del, get, getAll, getAllKeys, put, putMany } from './db';
 
 export interface ProjectRecord {
@@ -89,7 +90,7 @@ export async function restoreAssets(doc: Doc): Promise<string[]> {
   const missing: string[] = [];
   await Promise.all(
     referencedAssets(doc).map(async (assetId) => {
-      if (assetStore.has(assetId)) return;
+      if (assetStore.has(assetId) || fontBlob(assetId)) return;
       const rec = await get<AssetRecord>('assets', assetId);
       if (!rec) return void missing.push(assetId);
       await loadAssetBlob(assetId, rec.blob);

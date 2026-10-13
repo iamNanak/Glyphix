@@ -45,6 +45,7 @@ const early = await item('shot', 1.1);
 const rest = await item('shot', 4);
 check('slide-up: lower and fading in at 1.1 s', early.y > rest.y + 10 && early.opacity < rest.opacity, `y ${early.y.toFixed(1)} vs ${rest.y.toFixed(1)}, opacity ${early.opacity.toFixed(2)}`);
 
+await page.getByRole('tab', { name: /Loop/ }).click();
 await preset('Loop animation', 'Ken Burns');
 shot = await layer('shot');
 // Compare one full cycle apart, after the layer's own keyframes (scale 0.94 → 1 over 0–1 s) have settled.
@@ -55,11 +56,13 @@ check('ken burns cycles match the comp length', shot.motion.loop?.period === 5 &
 // --- Text: typewriter + wave.
 await page.evaluate(() => window.__glyphix.select('headline'));
 await page.waitForTimeout(200);
+await page.getByRole('tab', { name: /Enter/ }).click();
 await preset('Enter animation', 'Typewriter');
+await page.getByRole('tab', { name: /Loop/ }).click();
 await preset('Loop animation', 'Wave');
 const head = await item('headline', 0.5);
-check('typewriter compiles to a hold-easing glyph animator', head.animator?.easing.kind === 'hold' && head.animator.stagger > 0);
-check('wave loop reaches the renderer', head.wave?.amplitude > 0, JSON.stringify(head.wave));
+check('typewriter compiles to a hold-easing glyph animator', head.enter?.easing.kind === 'hold' && head.enter.stagger > 0);
+check('wave loop reaches the renderer', head.loop?.kind === 'wave' && head.loop.amplitude > 0, JSON.stringify(head.loop));
 check('custom glyph controls hidden while a glyph preset is active', (await page.getByText('Custom glyph animation').count()) === 0);
 
 // --- Timeline: length + fps are undoable doc edits.

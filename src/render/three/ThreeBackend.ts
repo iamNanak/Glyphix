@@ -1,8 +1,11 @@
 import * as THREE from 'three/webgpu';
 import {
+  assignUnits,
   easingLUT,
-  glyphRanks,
+  mulberry32,
+  unitDelays,
   type Color,
+  type GlyphAnimator,
   type BackgroundItem,
   type FrameKind,
   type ImageItem,
@@ -11,20 +14,22 @@ import {
   type TextItem,
 } from '@/doc';
 import { assetStore, pickLevel } from '@/assets/assetStore';
-import { fontLibrary, type LaidOutGlyph } from '@/text/fontLibrary';
+import { ATLAS_SPREAD_EM, fontLibrary, type LaidOutGlyph, type TextLayout } from '@/text/fontLibrary';
 import { drawFrameBar } from '@/styling/frameBar';
 import { getSharedDevice } from './gpuDevice';
 import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
+import { BG_MODE, blankTexture, createBackgroundMaterial, createImageMaterial, createShadowMaterial, tiltPlane } from './materials';
 import {
-  BG_MODE,
-  blankTexture,
-  createBackgroundMaterial,
-  createGlyphMaterial,
-  createImageMaterial,
-  createShadowMaterial,
-  GLYPH_LUT_SIZE,
-  tiltPlane,
-} from './materials';
+  createGlyphMaterials,
+  createGlyphUniforms,
+  LOOP_KIND,
+  LUT_SIZE,
+  PARAMS_ROWS,
+  PARAMS_WIDTH,
+  SCRAMBLE_MAX,
+  type GlyphUniforms,
+  type PoseUniforms,
+} from './glyphMaterial';
 
 const DEG = Math.PI / 180;
 const unitPlane = new THREE.PlaneGeometry(1, 1);
@@ -56,7 +61,6 @@ interface FrameCtx {
   width: number;
   height: number;
   textures: TextureCache;
-  atlas: THREE.DataTexture;
   /** Device pixels per comp pixel. */
   pxPerUnit: number;
   stats: { glyphs: number };
@@ -303,91 +307,228 @@ class ImageNode implements LayerNode {
   }
 }
 
+const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&@$*+?<>';
+
+/** Pose uniforms from a doc animator (doc: comp px, y down, degrees → shader: px, y up, radians). */
+function setPose(P: PoseUniforms, anim: GlyphAnimator | null, kind: 'enter' | 'exit') {
+  if (!anim) {
+    // Enter: always finished (k = 0). Exit: never started (k = 0).
+    P.start.value = kind === 'enter' ? -1e6 : 1e9;
+    P.duration.value = 1;
+    return;
+  }
+  const pose = anim.pose;
+  P.start.value = anim.start;
+  P.duration.value = anim.duration;
+  P.offset.value.set(pose.offsetX, -pose.offsetY);
+  P.scale.value.set(pose.scaleX, pose.scaleY);
+  P.rotation.value = -pose.rotation * DEG;
+  P.rotateX.value = pose.rotateX * DEG;
+  P.rotateY.value = pose.rotateY * DEG;
+  P.skew.value = pose.skewX * DEG;
+  P.opacity.value = pose.opacity;
+  P.blur.value = Math.max(0, pose.blur) / (2 * ATLAS_SPREAD_EM);
+  P.spread.value = pose.spread;
+  if (pose.color) {
+    setColor(tmpVec3, pose.color);
+    P.tint.value.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, pose.color[3]);
+  } else P.tint.value.set(0, 0, 0, 0);
+  P.randomOffset.value = pose.randomOffset;
+  P.randomRotation.value = pose.randomRotation * DEG;
+  P.scramble.value = pose.scramble ? 1 : 0;
+}
+
+const timingKey = (a: GlyphAnimator | null) => (a ? `${a.unit}|${a.order}|${a.seed}|${a.stagger}|${JSON.stringify(a.falloff)}` : '-');
+
 class TextNode implements LayerNode {
   readonly root = new THREE.Group();
-  private m: ReturnType<typeof createGlyphMaterial> | null = null;
-  private mesh: THREE.Mesh | null = null;
+  private params = new THREE.DataTexture(new Float32Array(PARAMS_WIDTH * PARAMS_ROWS * 4), PARAMS_WIDTH, PARAMS_ROWS, THREE.RGBAFormat, THREE.FloatType);
+  private u: GlyphUniforms;
+  private mats: ReturnType<typeof createGlyphMaterials>;
+  private fillMesh: THREE.Mesh | null = null;
+  private shadowMesh: THREE.Mesh | null = null;
   private geom: THREE.InstancedBufferGeometry | null = null;
+  private drawn: LaidOutGlyph[] = [];
+  private text = '';
   private layoutKey = '';
-  private lutKey = '';
-  private glyphCount = 0;
+  private timing = '';
+  private lutKeys = ['', ''];
+  private scrambleKey = '';
+
+  /** The atlas array texture was recreated (it grew a page, or was rebuilt). */
+  setAtlas(atlas: THREE.Texture) {
+    this.u.atlas.value = atlas;
+  }
+
+  constructor(atlas: THREE.Texture) {
+    this.params.minFilter = THREE.NearestFilter;
+    this.params.magFilter = THREE.NearestFilter;
+    this.params.generateMipmaps = false;
+    this.params.colorSpace = THREE.NoColorSpace;
+    this.params.needsUpdate = true;
+    this.u = createGlyphUniforms(atlas, this.params);
+    this.mats = createGlyphMaterials(this.u);
+  }
 
   update(raw: RenderItem, ctx: FrameCtx) {
     const item = raw as TextItem;
     applyTransform(this.root, item);
-    if (!this.m) {
-      this.m = createGlyphMaterial(ctx.atlas);
+    const layout = fontLibrary.layout(item);
+    if (!layout) {
+      this.root.visible = false;
+      return;
     }
-    const anim = item.animator;
-    const key = `${item.fontId}|${item.tracking}|${item.align}|${item.text}|${anim?.order}|${anim?.seed}`;
+    const key = `${layout.fontId}|${item.weight}|${item.tracking}|${item.align}|${item.lineHeight}|${item.text}|${layout.generation}`;
     if (key !== this.layoutKey) {
-      const layout = fontLibrary.layout(item.fontId, item.text, item.tracking, item.align);
-      if (!layout) {
-        this.root.visible = false;
-        return;
-      }
-      this.rebuild(layout.glyphs, item);
+      this.rebuild(layout, item.text);
       this.layoutKey = key;
+      this.timing = '';
+      this.scrambleKey = '';
     }
-    this.root.visible = true;
-    ctx.stats.glyphs += this.glyphCount;
+    const timing = `${timingKey(item.enter)}#${timingKey(item.exit)}`;
+    if (timing !== this.timing) {
+      this.writeTiming(item);
+      this.timing = timing;
+    }
+    const u = this.u;
+    if ((item.enter?.pose.scramble || item.exit?.pose.scramble) && this.scrambleKey !== key) {
+      this.writeScramble(layout.fontId, item.weight);
+      this.scrambleKey = key;
+    }
+    this.writeLUT(0, item.enter?.easing ?? null);
+    this.writeLUT(1, item.exit?.easing ?? null);
 
-    const u = this.m.u;
+    this.root.visible = true;
+    ctx.stats.glyphs += this.drawn.length;
+
+    const fs = item.fontSize;
     u.t.value = ctx.t;
-    u.fontSize.value = item.fontSize;
+    u.fontSize.value = fs;
+    u.blockSize.value.set(layout.width, layout.height);
     setColor(u.color.value, item.color);
     u.alpha.value = item.color[3] * item.opacity;
+    u.opacity.value = item.opacity;
     u.glow.value = item.glow;
     setColor(u.glowColor.value, item.glowColor);
     u.glowAlpha.value = item.glowColor[3] * item.opacity;
-    u.waveAmp.value = item.wave?.amplitude ?? 0;
-    u.wavePeriod.value = item.wave?.period ?? 1;
-    u.waveSpread.value = item.wave?.spread ?? 0;
 
-    if (anim) {
-      u.start.value = anim.start;
-      u.duration.value = anim.duration;
-      u.stagger.value = anim.stagger;
-      // Doc offsets are comp px (y down) at scale 1; glyph space is y-up.
-      u.fromOffset.value.set(anim.from.offsetX, -anim.from.offsetY);
-      u.fromScale.value = anim.from.scale;
-      u.fromRotation.value = -anim.from.rotation * DEG;
-      u.fromOpacity.value = anim.from.opacity;
-      const lutKey = JSON.stringify(anim.easing);
-      if (lutKey !== this.lutKey) {
-        const lut = easingLUT(anim.easing, GLYPH_LUT_SIZE);
-        const arr = u.lut.array as number[];
-        for (let i = 0; i < GLYPH_LUT_SIZE; i++) arr[i] = lut[i]!;
-        this.lutKey = lutKey;
-      }
-    } else {
-      // Rest pose.
-      u.start.value = -1e6;
-      u.duration.value = 1;
-      u.stagger.value = 0;
+    const g = item.gradient;
+    u.gradient.value = g ? 1 : 0;
+    if (g) {
+      u.gradAngle.value = g.angle * DEG;
+      setColor(tmpVec3, g.from);
+      u.gradFrom.value.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, g.from[3]);
+      setColor(tmpVec3, g.to);
+      u.gradTo.value.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, g.to[3]);
     }
+    // SDF units: 0.5 of the field spans ATLAS_SPREAD_EM on each side of the edge.
+    const toSDF = (px: number, maxShare: number) => Math.min(maxShare, Math.max(0, px / fs) / (2 * ATLAS_SPREAD_EM));
+    const o = item.outline;
+    u.outline.value = o && o.width > 0 ? toSDF(o.width, 0.42) : 0;
+    if (o) {
+      setColor(tmpVec3, o.color);
+      u.outlineColor.value.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, o.color[3]);
+    }
+    const sh = item.shadow;
+    if (this.shadowMesh) this.shadowMesh.visible = !!sh;
+    if (sh) {
+      u.shadowOffset.value.set(sh.offsetX, -sh.offsetY);
+      u.shadowBlur.value = toSDF(sh.blur, 0.48 - u.outline.value);
+      setColor(tmpVec3, sh.color);
+      u.shadowColor.value.set(tmpVec3.x, tmpVec3.y, tmpVec3.z, sh.color[3]);
+    }
+
+    setPose(u.enter, item.enter, 'enter');
+    setPose(u.exit, item.exit, 'exit');
+    const loop = item.loop;
+    u.loopKind.value = loop ? LOOP_KIND[loop.kind] : 0;
+    u.loopAmp.value = loop?.amplitude ?? 0;
+    u.loopPeriod.value = loop?.period ?? 1;
+    u.loopSpread.value = loop?.spread ?? 0;
   }
 
-  private rebuild(glyphs: LaidOutGlyph[], item: TextItem) {
-    const drawn = glyphs.filter((g) => g.glyph);
+  /** Easing LUT rows (0 = enter, 1 = exit); null = linear. */
+  private writeLUT(row: 0 | 1, easing: GlyphAnimator['easing'] | null) {
+    const key = JSON.stringify(easing);
+    if (this.lutKeys[row] === key) return;
+    const lut = easingLUT(easing ?? { kind: 'linear' }, LUT_SIZE);
+    const data = this.params.image.data as Float32Array;
+    for (let i = 0; i < LUT_SIZE; i++) data[(row * PARAMS_WIDTH + i) * 4] = lut[i]!;
+    this.params.needsUpdate = true;
+    this.lutKeys[row] = key;
+  }
+
+  /** Alternate glyphs for the scramble effect, from the same font and weight. */
+  private writeScramble(fontId: string, weight: number) {
+    const data = this.params.image.data as Float32Array;
+    const size = fontLibrary.atlasSize;
+    let n = 0;
+    for (const ch of SCRAMBLE_CHARS) {
+      const r = fontLibrary.glyphFor(fontId, weight, ch.codePointAt(0)!);
+      const a = r?.glyph;
+      if (!a || n >= SCRAMBLE_MAX) continue;
+      data.set([a.page + a.ax / size, a.ay / size, a.aw / size, a.ah / size], (2 * PARAMS_WIDTH + n) * 4);
+      data.set([a.l, a.b, a.r, a.t], (3 * PARAMS_WIDTH + n) * 4);
+      n++;
+    }
+    this.u.scrambleCount.value = n;
+    this.params.needsUpdate = true;
+  }
+
+  /** Per-glyph start delays, randoms and pivots for the enter and exit animators. */
+  private writeTiming(item: TextItem) {
+    const geom = this.geom;
+    if (!geom) return;
+    const delay = geom.getAttribute('aDelay') as THREE.InstancedBufferAttribute;
+    const pivot = geom.getAttribute('aPivot') as THREE.InstancedBufferAttribute;
+    const d = delay.array as Float32Array;
+    const pv = pivot.array as Float32Array;
+    const drawn = this.drawn;
+    [item.enter, item.exit].forEach((anim, slot) => {
+      const unit = anim?.unit ?? 'glyph';
+      const { units, count } = assignUnits(this.text, drawn, unit);
+      const delays = anim ? unitDelays(count, anim) : new Array<number>(count).fill(0);
+      const rng = mulberry32(((anim?.seed ?? 0) + 1) * 7919);
+      const rands = Array.from({ length: count }, () => rng());
+      // Pivot = centre of the unit's glyph boxes.
+      const box = Array.from({ length: count }, () => [Infinity, Infinity, -Infinity, -Infinity]);
+      drawn.forEach((g, i) => {
+        const a = g.glyph!;
+        const b = box[units[i]!]!;
+        b[0] = Math.min(b[0]!, g.x + a.l);
+        b[1] = Math.min(b[1]!, g.y + a.b);
+        b[2] = Math.max(b[2]!, g.x + a.r);
+        b[3] = Math.max(b[3]!, g.y + a.t);
+      });
+      drawn.forEach((_, i) => {
+        const un = units[i]!;
+        const b = box[un]!;
+        d[i * 4 + slot] = delays[un]!;
+        d[i * 4 + 2 + slot] = rands[un]!;
+        pv[i * 4 + slot * 2] = (b[0]! + b[2]!) / 2;
+        pv[i * 4 + slot * 2 + 1] = (b[1]! + b[3]!) / 2;
+      });
+    });
+    delay.needsUpdate = true;
+    pivot.needsUpdate = true;
+  }
+
+  private rebuild(layout: TextLayout, text: string) {
+    const drawn = layout.glyphs.filter((g) => g.glyph);
     const n = drawn.length;
-    const anim = item.animator;
-    const ranks = anim ? glyphRanks(n, anim.order, anim.seed) : new Array<number>(n).fill(0);
     const quad = new Float32Array(n * 4);
     const uvs = new Float32Array(n * 4);
-    const rank = new Float32Array(n);
-    const index = new Float32Array(n);
+    const pen = new Float32Array(n * 4);
     const size = fontLibrary.atlasSize;
     drawn.forEach((g, i) => {
       const a = g.glyph!;
       quad.set([g.x + a.l, g.y + a.b, g.x + a.r, g.y + a.t], i * 4);
-      uvs.set([a.ax / size, a.ay / size, a.aw / size, a.ah / size], i * 4);
-      rank[i] = ranks[i]!;
-      index[i] = i;
+      uvs.set([a.page + a.ax / size, a.ay / size, a.aw / size, a.ah / size], i * 4);
+      pen.set([g.x, g.y, g.advance, i], i * 4);
     });
 
-    if (this.mesh) {
-      this.root.remove(this.mesh);
+    if (this.fillMesh) {
+      this.root.remove(this.fillMesh, this.shadowMesh!);
       this.geom!.dispose();
     }
     const geom = new THREE.InstancedBufferGeometry();
@@ -396,20 +537,29 @@ class TextNode implements LayerNode {
     geom.setAttribute('uv', unitPlane.getAttribute('uv'));
     geom.setAttribute('aQuad', new THREE.InstancedBufferAttribute(quad, 4));
     geom.setAttribute('aUV', new THREE.InstancedBufferAttribute(uvs, 4));
-    geom.setAttribute('aRank', new THREE.InstancedBufferAttribute(rank, 1));
-    geom.setAttribute('aIndex', new THREE.InstancedBufferAttribute(index, 1));
+    geom.setAttribute('aPen', new THREE.InstancedBufferAttribute(pen, 4));
+    geom.setAttribute('aDelay', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
+    geom.setAttribute('aPivot', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
     geom.instanceCount = n;
-    const mesh = new THREE.Mesh(geom, this.m!.mat);
-    mesh.frustumCulled = false;
-    this.root.add(mesh);
-    this.mesh = mesh;
+    const shadow = new THREE.Mesh(geom, this.mats.shadow);
+    shadow.frustumCulled = false;
+    shadow.userData.order = 0;
+    const fill = new THREE.Mesh(geom, this.mats.fill);
+    fill.frustumCulled = false;
+    fill.userData.order = 1;
+    this.root.add(shadow, fill);
+    this.fillMesh = fill;
+    this.shadowMesh = shadow;
     this.geom = geom;
-    this.glyphCount = n;
+    this.drawn = drawn;
+    this.text = text;
   }
 
   dispose() {
     this.geom?.dispose();
-    this.m?.mat.dispose();
+    this.mats.fill.dispose();
+    this.mats.shadow.dispose();
+    this.params.dispose();
   }
 }
 
@@ -425,8 +575,10 @@ export class ThreeBackend implements RenderBackend {
   private bufferSize = new THREE.Vector2();
   private cssSize = { width: 1, height: 1 };
   private view: View | null = null;
-  private atlas: THREE.DataTexture;
-  private atlasVersion = -1;
+  private atlas: THREE.DataArrayTexture;
+  /** Atlas buffer + per-page versions this backend has uploaded. */
+  private atlasData: Uint8Array | null = null;
+  private uploaded: number[] = [];
   private lastStats = { glyphs: 0 };
 
   private constructor(
@@ -435,12 +587,7 @@ export class ThreeBackend implements RenderBackend {
     fullResAssets: boolean,
   ) {
     this.textures = new TextureCache(fullResAssets);
-    this.atlas = new THREE.DataTexture(fontLibrary.atlas, fontLibrary.atlasSize, fontLibrary.atlasSize, THREE.RedFormat, THREE.UnsignedByteType);
-    this.atlas.flipY = false;
-    this.atlas.minFilter = THREE.LinearFilter;
-    this.atlas.magFilter = THREE.LinearFilter;
-    this.atlas.generateMipmaps = false;
-    this.atlas.colorSpace = THREE.NoColorSpace;
+    this.atlas = this.makeAtlas();
     renderer.onDeviceLost = (info) => {
       console.error('[glyphix] GPU device lost', info);
       this.onLost?.(info.reason ?? info.message ?? 'unknown');
@@ -492,10 +639,7 @@ export class ThreeBackend implements RenderBackend {
       cam.bottom = -y1;
       cam.updateProjectionMatrix();
     }
-    if (fontLibrary.atlasVersion !== this.atlasVersion) {
-      this.atlas.needsUpdate = true;
-      this.atlasVersion = fontLibrary.atlasVersion;
-    }
+    this.syncAtlas();
 
     this.renderer.getDrawingBufferSize(this.bufferSize);
     const ctx: FrameCtx = {
@@ -503,17 +647,17 @@ export class ThreeBackend implements RenderBackend {
       width: list.width,
       height: list.height,
       textures: this.textures,
-      atlas: this.atlas,
       pxPerUnit: this.bufferSize.x / (x1 - x0),
       stats: { glyphs: 0 },
     };
     const seen = new Set<string>();
+    const gen = fontLibrary.generation;
     list.items.forEach((item, order) => {
       const nodeKey = `${item.kind}:${item.id}`;
       seen.add(nodeKey);
       let node = this.nodes.get(nodeKey);
       if (!node) {
-        node = item.kind === 'background' ? new BackgroundNode() : item.kind === 'image' ? new ImageNode(this.bars) : new TextNode();
+        node = item.kind === 'background' ? new BackgroundNode() : item.kind === 'image' ? new ImageNode(this.bars) : new TextNode(this.atlas);
         this.nodes.set(nodeKey, node);
         this.scene.add(node.root);
       }
@@ -521,6 +665,12 @@ export class ThreeBackend implements RenderBackend {
       // Children may set userData.order (0..9) to stack within their layer.
       node.root.traverse((o) => (o.renderOrder = order * 10 + ((o.userData.order as number | undefined) ?? 0)));
     });
+    // The glyph atlas filled up and was rebuilt during this frame: earlier text layers hold stale
+    // glyph rects, so lay them out again before drawing (keeps preview = export).
+    if (fontLibrary.generation !== gen) {
+      ctx.stats.glyphs = 0;
+      list.items.forEach((item) => this.nodes.get(`${item.kind}:${item.id}`)!.update(item, ctx));
+    }
     for (const [key, node] of this.nodes) {
       if (!seen.has(key)) {
         this.scene.remove(node.root);
@@ -529,10 +679,7 @@ export class ThreeBackend implements RenderBackend {
       }
     }
     // Text layout may have pulled new glyphs into the atlas during update().
-    if (fontLibrary.atlasVersion !== this.atlasVersion) {
-      this.atlas.needsUpdate = true;
-      this.atlasVersion = fontLibrary.atlasVersion;
-    }
+    this.syncAtlas();
     this.lastStats = ctx.stats;
     const r = this.renderer;
     if (v) {
@@ -555,6 +702,41 @@ export class ThreeBackend implements RenderBackend {
     }
     this.textures.endFrame();
     this.bars.endFrame();
+  }
+
+  private makeAtlas(): THREE.DataArrayTexture {
+    const size = fontLibrary.atlasSize;
+    const tex = new THREE.DataArrayTexture(fontLibrary.atlas, size, size, fontLibrary.pages);
+    tex.format = THREE.RedFormat;
+    tex.type = THREE.UnsignedByteType;
+    tex.flipY = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.needsUpdate = true;
+    this.atlasData = fontLibrary.atlas;
+    this.uploaded = fontLibrary.pageVersions.slice();
+    return tex;
+  }
+
+  /** Upload changed atlas pages; recreate the array texture when pages were added or reset. */
+  private syncAtlas() {
+    if (fontLibrary.atlas !== this.atlasData) {
+      this.atlas.dispose();
+      this.atlas = this.makeAtlas();
+      for (const node of this.nodes.values()) if (node instanceof TextNode) node.setAtlas(this.atlas);
+      return;
+    }
+    let dirty = false;
+    fontLibrary.pageVersions.forEach((v, i) => {
+      if (this.uploaded[i] !== v) {
+        this.atlas.addLayerUpdate(i);
+        this.uploaded[i] = v;
+        dirty = true;
+      }
+    });
+    if (dirty) this.atlas.needsUpdate = true;
   }
 
   stats(): RenderStats {

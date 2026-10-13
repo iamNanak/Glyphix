@@ -74,6 +74,7 @@ export function ease(e: Easing, p: number): number {
 export const Easings = {
   linear: { kind: 'linear' } as Easing,
   easeOutCubic: { kind: 'bezier', x1: 0.33, y1: 1, x2: 0.68, y2: 1 } as Easing,
+  easeInCubic: { kind: 'bezier', x1: 0.32, y1: 0, x2: 0.67, y2: 0 } as Easing,
   easeInOutCubic: { kind: 'bezier', x1: 0.65, y1: 0, x2: 0.35, y2: 1 } as Easing,
   easeOutBack: { kind: 'bezier', x1: 0.34, y1: 1.56, x2: 0.64, y2: 1 } as Easing,
 } as const;

@@ -2,8 +2,6 @@
 import * as THREE from 'three/webgpu';
 import {
   abs,
-  attribute,
-  clamp,
   cos,
   dot,
   float,
@@ -21,7 +19,6 @@ import {
   smoothstep,
   texture,
   uniform,
-  uniformArray,
   uv,
   vec2,
   vec3,
@@ -214,87 +211,3 @@ export function createShadowMaterial() {
   return { mat, u };
 }
 
-// ---------------------------------------------------------------------------
-
-export const GLYPH_LUT_SIZE = 64;
-
-/**
- * Instanced SDF glyphs. Per-glyph animation is computed in the vertex shader from
- * (rank, t) — one animator template, no per-glyph tracks, ~zero CPU per frame.
- */
-export function createGlyphMaterial(atlas: THREE.Texture) {
-  const u = {
-    t: uniform(0),
-    start: uniform(0),
-    duration: uniform(1),
-    stagger: uniform(0),
-    fromOffset: uniform(new THREE.Vector2(0, 0)),
-    fromScale: uniform(1),
-    fromRotation: uniform(0),
-    fromOpacity: uniform(1),
-    lut: uniformArray(new Array<number>(GLYPH_LUT_SIZE).fill(0).map((_, i) => i / (GLYPH_LUT_SIZE - 1)), 'float'),
-    fontSize: uniform(96),
-    color: uniform(new THREE.Vector3(1, 1, 1)),
-    alpha: uniform(1),
-    glow: uniform(0),
-    glowColor: uniform(new THREE.Vector3(1, 1, 1)),
-    glowAlpha: uniform(1),
-    // Continuous wave loop: y += amp · sin(2π(t/period − index·spread)).
-    waveAmp: uniform(0),
-    wavePeriod: uniform(1),
-    waveSpread: uniform(0),
-    atlas: texture(atlas),
-  };
-
-  const aQuad = attribute('aQuad', 'vec4'); // l, b, r, t in em (pen-relative, y-up)
-  const aUV = attribute('aUV', 'vec4'); // x, y, w, h in atlas uv
-  const aRank = attribute('aRank', 'float');
-  const aIndex = attribute('aIndex', 'float'); // visual order, for the wave phase
-
-  const progress = clamp(u.t.sub(u.start).sub(u.stagger.mul(aRank)).div(max(u.duration, 1e-5)), 0, 1);
-  const eased = Fn(() => {
-    const x = progress.mul(GLYPH_LUT_SIZE - 1);
-    const f0 = x.floor();
-    const i0 = f0.toInt();
-    const i1 = min(f0.add(1), float(GLYPH_LUT_SIZE - 1)).toInt();
-    // @types/three types array elements loosely; they are floats here.
-    const a = u.lut.element(i0) as unknown as F;
-    const b = u.lut.element(i1) as unknown as F;
-    return mix(a, b, x.fract());
-  })();
-
-  const corner = positionGeometry.xy.add(0.5); // 0..1, y-up
-
-  const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthTest: false, depthWrite: false });
-  mat.positionNode = Fn(() => {
-    const lb = aQuad.xy.mul(u.fontSize);
-    const rt = aQuad.zw.mul(u.fontSize);
-    const center = lb.add(rt).mul(0.5);
-    const local = mix(lb, rt, corner).sub(center);
-    const s = mix(u.fromScale, 1, eased);
-    const rot = mix(u.fromRotation, 0, eased);
-    const c = cos(rot);
-    const sn = sin(rot);
-    const scaled = local.mul(s);
-    const rotated = vec2(scaled.x.mul(c).sub(scaled.y.mul(sn)), scaled.x.mul(sn).add(scaled.y.mul(c)));
-    const offset = mix(u.fromOffset, vec2(0, 0), eased);
-    const wave = u.waveAmp.mul(sin(u.t.div(max(u.wavePeriod, 1e-3)).sub(aIndex.mul(u.waveSpread)).mul(Math.PI * 2)));
-    return vec3(center.add(rotated).add(offset).add(vec2(0, wave)), 0);
-  })();
-
-  const vAtlasUV = vec2(aUV.x.add(corner.x.mul(aUV.z)), aUV.y.add(float(1).sub(corner.y).mul(aUV.w))).toVarying('vAtlasUV');
-  const vGlyphAlpha = mix(u.fromOpacity, 1, saturate(eased)).toVarying('vGlyphAlpha');
-
-  mat.colorNode = Fn(() => {
-    const d = u.atlas.sample(vAtlasUV).r;
-    const w = max(fwidth(d), 1e-4).mul(0.7);
-    const fill = smoothstep(float(0.5).sub(w), float(0.5).add(w), d);
-    const halo = smoothstep(0.0, 0.5, d);
-    const glowA = halo.mul(halo).mul(u.glow).mul(u.glowAlpha);
-    const rgb = mix(u.glowColor, u.color, fill);
-    const a = max(fill.mul(u.alpha), glowA);
-    return vec4(rgb, a.mul(vGlyphAlpha));
-  })();
-
-  return { mat, u };
-}

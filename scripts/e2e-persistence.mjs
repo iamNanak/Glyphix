@@ -85,7 +85,7 @@ await page.evaluate(async () => {
 await page.reload();
 await ready();
 const migrated = await page.evaluate(() => window.__glyphix.state().doc);
-check('v1 project migrated on load', migrated.id === 'proj-v1-fixture' && migrated.schemaVersion === 2 && migrated.comp.layers[1].motion !== undefined);
+check('v1 project migrated on load', migrated.id === 'proj-v1-fixture' && migrated.schemaVersion === 3 && migrated.comp.layers[1].motion?.exit === null && migrated.comp.layers[2].weight === 400, `schema ${migrated.schemaVersion}`);
 
 // A missing image warns but still opens the document.
 await page.evaluate(async (id) => {
