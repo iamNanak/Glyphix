@@ -9,6 +9,8 @@ import { useSaveStatus } from '@/persistence/autosave';
 import { fontLibrary } from '@/text/fontLibrary';
 import { createBackend } from '@/render/backend';
 import { renderFrameBitmap } from '@/export/exporter';
+import { importVideo, videoMeta } from '@/video/videoAssets';
+import { createExactFrames } from '@/video/exactFrames';
 
 declare global {
   interface Window {
@@ -29,6 +31,8 @@ window.__glyphix = {
   fonts: fontLibrary,
   /** Renderer + frame capture from the app's own module graph (same font/asset singletons). */
   render: { createBackend, renderFrameBitmap },
+  /** Video assets and the frame-exact provider (app module instances). */
+  video: { importVideo, videoMeta, createExactFrames },
   /** Raw store access for experiments (dev only). */
   editor: useEditor,
   setTime: (t: number) => useEditor.getState().setTime(t),

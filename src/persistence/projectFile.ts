@@ -1,8 +1,8 @@
 // .glyphix project files: a zip with project.json (the document + an asset manifest) and the
-// image and font files under assets/. Opened files are untrusted input: sizes, paths and ids are validated
+// image, font and video files under assets/. Opened files are untrusted input: sizes, paths and ids are validated
 // and the document goes through migrate() like everything else.
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { FONT_ASSET_PREFIX, migrate, referencedAssets, SCHEMA_VERSION, type Doc } from '@/doc';
+import { FONT_ASSET_PREFIX, VIDEO_ASSET_PREFIX, migrate, referencedAssets, SCHEMA_VERSION, type Doc } from '@/doc';
 import { assetBlob } from '@/assets/assetStore';
 
 export const PROJECT_EXTENSION = '.glyphix';
@@ -20,7 +20,14 @@ const EXT: Record<string, string> = {
   'image/avif': 'avif',
   'font/ttf': 'ttf',
   'font/otf': 'otf',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+  'video/x-matroska': 'mkv',
 };
+
+/** The manifest type for a stored file whose blob type isn't one we know. */
+const fallbackType = (id: string) => (id.startsWith(FONT_ASSET_PREFIX) ? 'font/ttf' : id.startsWith(VIDEO_ASSET_PREFIX) ? 'video/mp4' : 'image/png');
 const MIME_BY_EXT = Object.fromEntries(Object.entries(EXT).map(([m, e]) => [e, m]));
 
 interface Manifest {
@@ -36,9 +43,9 @@ export async function writeProjectFile(doc: Doc): Promise<Blob> {
   for (const id of referencedAssets(doc)) {
     const blob = await assetBlob(id);
     if (!blob) continue; // missing in this session: the document still references it
-    const type = EXT[blob.type] ? blob.type : id.startsWith(FONT_ASSET_PREFIX) ? 'font/ttf' : 'image/png';
+    const type = EXT[blob.type] ? blob.type : fallbackType(id);
     const path = `assets/${id}.${EXT[type]}`;
-    // Images are already compressed: store them without re-deflating. Fonts do compress.
+    // Images and videos are already compressed: store them without re-deflating. Fonts do compress.
     files[path] = new Uint8Array(await blob.arrayBuffer());
     assets.push({ id, path, type });
   }
