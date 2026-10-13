@@ -1,18 +1,18 @@
 import { useMemo, useState } from 'react';
 import type { Layer } from '@/doc';
-import { Blend, ArrowDown, ArrowUp, Copy, Eye, EyeOff, Image, Lock, Square, Trash2, Type, Unlock } from 'lucide-react';
+import { Blend, Film, ArrowDown, ArrowUp, Copy, Eye, EyeOff, Image, Lock, Square, Trash2, Type, Unlock } from 'lucide-react';
 import { useEditor } from './store';
 import { IconButton } from './ui';
 
-const icons = { background: Square, image: Image, text: Type, adjustment: Blend } as const;
+const icons = { background: Square, image: Image, video: Film, text: Type, adjustment: Blend } as const;
 
 export function LayersPanel() {
   // Re-render only when something the panel shows changes (not on every move/scale).
-  const signature = useEditor((s) => s.doc.comp.layers.map((l) => `${l.id}\u0001${l.type}\u0001${l.name}\u0001${+l.visible}\u0001${+l.locked}`).join('\u0002'));
+  const signature = useEditor((s) => s.doc.comp.layers.map((l) => `${l.id}\u0001${l.type === 'image' && l.video ? 'video' : l.type}\u0001${l.name}\u0001${+l.visible}\u0001${+l.locked}`).join('\u0002'));
   const layers = useMemo(
     () =>
       signature.split('\u0002').map((row) => {
-        const [id, type, name, visible, locked] = row.split('\u0001') as [string, Layer['type'], string, string, string];
+        const [id, type, name, visible, locked] = row.split('\u0001') as [string, Layer['type'] | 'video', string, string, string];
         return { id, type, name, visible: visible === '1', locked: locked === '1' };
       }),
     [signature],

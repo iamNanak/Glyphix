@@ -70,8 +70,8 @@ export interface ImageItem extends ResolvedTransform {
   frameBar: number;
   tilt: { rotateX: number; rotateY: number; perspective: number };
   effects: ResolvedEffect[];
-  /** Video layers: which source frame to show (seconds into the file). */
-  video: { time: number } | null;
+  /** Video layers: which source frame to show (seconds into the file), and how loud the live preview plays. */
+  video: { time: number; volume: number } | null;
 }
 
 export interface TextItem extends ResolvedTransform {
@@ -177,7 +177,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
             perspective: layer.tilt.perspective,
           },
           effects,
-          video: layer.video ? { time: videoSourceTime(layer.video, t) } : null,
+          video: layer.video ? { time: videoSourceTime(layer.video, t), volume: layer.video.muted ? 0 : layer.video.volume } : null,
           ...tr,
         });
         break;

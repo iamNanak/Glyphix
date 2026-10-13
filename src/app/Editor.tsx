@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Blend, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Type, Undo2 } from 'lucide-react';
+import { Activity, Blend, ImagePlus, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Type, Undo2 } from 'lucide-react';
 import { flushSave, useSaveStatus } from '@/persistence/autosave';
 import { openProjectFile, saveProjectFile } from '@/persistence/actions';
 import { PROJECT_EXTENSION } from '@/persistence/projectFile';
@@ -12,8 +12,8 @@ import { Inspector } from './Inspector';
 import { Button, IconButton, inputClass, SelectField } from './ui';
 import { Slider } from '@/components/wensity/slider';
 import { Switch } from '@/components/wensity/switch';
-import { importImage } from '@/assets/assetStore';
-import { createImageLayer, fitSize, isPlaced, makeInsert, offsetProp } from '@/doc';
+import { isPlaced, offsetProp } from '@/doc';
+import { isMediaFile, MEDIA_ACCEPT, placeMedia } from './media';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
 import { layerIndex, previewDoc } from './store';
@@ -33,7 +33,7 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
 
   return (
     <div className="grid h-full grid-rows-[48px_1fr_88px] bg-app text-sm">
-      <Toolbar backend={backend} onProjects={() => setProjectsOpen(true)} onExport={() => setExportOpen(true)} />
+      <Toolbar backend={backend} onProjects={() => setProjectsOpen(true)} onExport={() => setExportOpen(true)} onError={setError} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <ProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} onError={setError} pickFile={pickFile} />
       <div className="grid min-h-0 grid-cols-[220px_1fr_288px]">
@@ -46,7 +46,7 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
               {error}
             </div>
           )}
-          <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-dim">Paste or drop an image · double-click text to edit, image to crop</p>
+          <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-dim">Paste or drop an image or video · double-click text to edit, image to crop</p>
         </main>
         <Inspector />
       </div>
@@ -62,6 +62,7 @@ function Stage({ onBackend, onError }: { onBackend: (kind: string) => void; onEr
   const preview = useEditor((s) => s.preview);
   const doc = useMemo(() => previewDoc(realDoc, preview), [realDoc, preview]);
   const time = useEditor((s) => s.time);
+  const playing = useEditor((s) => s.playing);
   const forceWebGL = useEditor((s) => s.forceWebGL);
   const view = useView((s) => s.view);
   const setHost = useView((s) => s.setHost);
@@ -72,6 +73,7 @@ function Stage({ onBackend, onError }: { onBackend: (kind: string) => void; onEr
     <Viewport
       doc={doc}
       time={time}
+      playing={playing}
       forceWebGL={forceWebGL}
       view={view}
       onHostResize={setHost}
@@ -111,7 +113,7 @@ function ProjectTitle() {
   );
 }
 
-function Toolbar({ backend, onProjects, onExport }: { backend: string; onProjects: () => void; onExport: () => void }) {
+function Toolbar({ backend, onProjects, onExport, onError }: { backend: string; onProjects: () => void; onExport: () => void; onError: (msg: string | null) => void }) {
   const canUndo = useEditor((s) => s.canUndo);
   const canRedo = useEditor((s) => s.canRedo);
   const forceWebGL = useEditor((s) => s.forceWebGL);
@@ -135,6 +137,7 @@ function Toolbar({ backend, onProjects, onExport }: { backend: string; onProject
       <IconButton label="Add text" shortcut="T" onClick={() => useEditor.getState().addText()}>
         <Type size={16} />
       </IconButton>
+      <AddMediaButton onError={onError} />
       <IconButton label="Add adjustment layer" onClick={() => useEditor.getState().addAdjustment()}>
         <Blend size={16} />
       </IconButton>
@@ -329,6 +332,31 @@ function useProjectShortcuts(pickFile: () => void, onError: (msg: string | null)
   }, [pickFile, onError, openExport]);
 }
 
+/** File picker for images and videos (the keyboard-friendly alternative to paste / drop). */
+function AddMediaButton({ onError }: { onError: (msg: string | null) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <IconButton label="Add image or video" onClick={() => input.current?.click()}>
+        <ImagePlus size={16} />
+      </IconButton>
+      <input
+        ref={input}
+        type="file"
+        accept={MEDIA_ACCEPT}
+        hidden
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) placeMedia(file).then(() => onError(null), (err: unknown) => onError(err instanceof Error ? err.message : String(err)));
+        }}
+      />
+    </>
+  );
+}
+
 function ZoomControls() {
   const zoom = useView((s) => s.view.zoom);
   const { fit, zoomAt, host } = useView.getState();
@@ -354,29 +382,10 @@ function usePasteImage(onError: (msg: string | null) => void) {
   const place = useCallback(
     async (file: File) => {
       try {
-        const started = performance.now();
-        const img = await importImage(file);
-        const s = useEditor.getState();
-        const selected = s.doc.comp.layers.find((l) => l.id === s.selectedId);
-        if (selected?.type === 'image') {
-          // Replace the selected image, keeping its position and styling.
-          const idx = layerIndex(s.doc, selected.id);
-          const { width, height } = fitSize(s.doc.comp, img.width, img.height);
-          s.set('Replace image', [
-            { path: ['comp', 'layers', idx, 'assetId'], value: img.id },
-            { path: ['comp', 'layers', idx, 'width'], value: width },
-            { path: ['comp', 'layers', idx, 'height'], value: height },
-          ]);
-        } else {
-          const layer = createImageLayer(s.doc.comp, img.id, img.width, img.height, file.name.replace(/\.[^.]+$/, '') || 'Image');
-          const at = selected ? layerIndex(s.doc, selected.id) + 1 : s.doc.comp.layers.length;
-          s.commit(makeInsert(['comp', 'layers'], at, layer, 'Add image'));
-          s.select(layer.id);
-        }
-        console.info(`[glyphix] image ${img.width}×${img.height} placed in ${Math.round(performance.now() - started)} ms`);
+        await placeMedia(file);
         onError(null);
       } catch (e) {
-        onError(`Could not read that image: ${String(e)}`);
+        onError(e instanceof Error ? e.message : `Could not read that file: ${String(e)}`);
       }
     },
     [onError],
@@ -384,7 +393,7 @@ function usePasteImage(onError: (msg: string | null) => void) {
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/'));
+      const file = [...(e.clipboardData?.files ?? [])].find(isMediaFile);
       if (file) {
         e.preventDefault();
         void place(file);
@@ -402,7 +411,7 @@ function usePasteImage(onError: (msg: string | null) => void) {
         );
         return;
       }
-      const file = files.find((f) => f.type.startsWith('image/'));
+      const file = files.find(isMediaFile);
       if (file) {
         e.preventDefault();
         void place(file);

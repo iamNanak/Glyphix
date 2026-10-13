@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { AnimationSection, ORDER_OPTIONS } from './AnimationSection';
 import { EffectsSection } from './EffectsSection';
+import { VideoSection } from './VideoSection';
 import { FontPicker } from './FontPicker';
 import { Switch } from '@/components/wensity/switch';
 import { fontLibrary } from '@/text/fontLibrary';
@@ -343,6 +344,7 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
         </div>
       </Section>
 
+      {layer.video && <VideoSection layer={{ ...layer, video: layer.video }} edit={edit} />}
       <CropSection layer={layer} index={index} />
       <Section title="Shadow">
         <PresetGrid

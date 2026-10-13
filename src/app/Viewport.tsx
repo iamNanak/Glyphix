@@ -5,10 +5,13 @@ import { fontLibrary } from '@/text/fontLibrary';
 import { createBackend, type RenderBackend, type RenderStats, type View } from '@/render/backend';
 import { frameStats } from '@/bench/frameStats';
 import { fitView } from '@/editor/viewStore';
+import { createPreviewFrames, type PreviewFrames } from '@/video/previewFrames';
 
 interface ViewportProps {
   doc: Doc;
   time: number;
+  /** The timeline is playing (video layers play live, with sound). */
+  playing?: boolean;
   forceWebGL: boolean;
   /** Where the comp sits in the panel. Omit to always fit. */
   view?: View;
@@ -26,14 +29,14 @@ interface ViewportProps {
  * Owns the preview canvas + backend. The canvas fills the panel; the comp is placed by `view`.
  * Renders on demand and rebuilds everything from the document after device/context loss.
  */
-export function Viewport({ doc, time, forceWebGL, view, onHostResize, continuous, onFrame, onStats, onError, children }: ViewportProps) {
+export function Viewport({ doc, time, playing = false, forceWebGL, view, onHostResize, continuous, onFrame, onStats, onError, children }: ViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const [epoch, setEpoch] = useState(0); // bump to recreate the backend (device loss)
   const [hostSize, setHostSize] = useState({ width: 1, height: 1 });
   const effectiveView = view ?? fitView(hostSize, doc.comp);
-  const live = useRef({ doc, time, view: effectiveView, continuous, onFrame, onStats, dirty: true });
-  live.current = { ...live.current, doc, time, view: effectiveView, continuous, onFrame, onStats, dirty: true };
+  const live = useRef({ doc, time, playing, view: effectiveView, continuous, onFrame, onStats, dirty: true });
+  live.current = { ...live.current, doc, time, playing, view: effectiveView, continuous, onFrame, onStats, dirty: true };
 
   useEffect(() => {
     const host = hostRef.current!;
@@ -48,6 +51,30 @@ export function Viewport({ doc, time, forceWebGL, view, onHostResize, continuous
     let raf = 0;
     let disposed = false;
     const markDirty = () => (live.current.dirty = true);
+    const frames: PreviewFrames = createPreviewFrames();
+    frames.onFrame = markDirty;
+    // Dev only: tests read live-playback sync stats from here.
+    if (import.meta.env.DEV) (window as { __glyphixFrames?: PreviewFrames }).__glyphixFrames = frames;
+    // Video frames: render now with what's there, and once more when prepare() brings new frames.
+    // One prepare in flight at a time; the latest request wins.
+    let preparing = false;
+    let pending: ReturnType<typeof evaluate> | null = null;
+    const prepare = (list: ReturnType<typeof evaluate>) => {
+      if (!list.items.some((i) => i.kind === 'image' && i.video)) return;
+      if (preparing) return void (pending = list);
+      preparing = true;
+      const before = frames.version;
+      backend!
+        .prepare(list)
+        .catch((e: unknown) => console.warn('[glyphix] video frame', e))
+        .finally(() => {
+          preparing = false;
+          if (frames.version !== before) markDirty();
+          const next = pending;
+          pending = null;
+          if (next && !disposed) prepare(next);
+        });
+    };
     const unsubs = [fontLibrary.onChange(markDirty), assetStore.onChange(markDirty)];
 
     const resize = () => {
@@ -68,12 +95,15 @@ export function Viewport({ doc, time, forceWebGL, view, onHostResize, continuous
       l.dirty = false;
       const t0 = performance.now();
       backend.setView(l.view);
-      backend.render(evaluate(l.doc, l.time));
+      frames.setPlaying(l.playing);
+      const list = evaluate(l.doc, l.time);
+      prepare(list);
+      backend.render(list);
       frameStats.push(now, performance.now() - t0);
       l.onStats?.(backend.stats());
     };
 
-    createBackend({ canvas, forceWebGL })
+    createBackend({ canvas, forceWebGL, frames })
       .then((b) => {
         if (disposed) return b.dispose();
         backend = b;
@@ -95,6 +125,7 @@ export function Viewport({ doc, time, forceWebGL, view, onHostResize, continuous
       ro.disconnect();
       unsubs.forEach((u) => u());
       backend?.dispose();
+      frames.dispose();
       canvas.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
