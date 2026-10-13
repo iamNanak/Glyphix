@@ -8,7 +8,9 @@ import { assetStore } from '@/assets/assetStore';
 import { useSaveStatus } from '@/persistence/autosave';
 import { fontLibrary } from '@/text/fontLibrary';
 import { createBackend } from '@/render/backend';
-import { renderFrameBitmap } from '@/export/exporter';
+import { exportVideo, renderFrameBitmap, runExport } from '@/export/exporter';
+import { mixAudio } from '@/export/audioMix';
+import * as mediabunny from 'mediabunny';
 import { importVideo, videoMeta } from '@/video/videoAssets';
 import { createExactFrames } from '@/video/exactFrames';
 
@@ -35,6 +37,15 @@ window.__glyphix = {
   video: { importVideo, videoMeta, createExactFrames },
   /** Raw store access for experiments (dev only). */
   editor: useEditor,
+  /** Export internals for e2e-export-v2 (mediabunny is exposed to decode outputs in the page). */
+  export: {
+    runExport,
+    exportVideo,
+    mixAudio,
+    mediabunny,
+    /** Register a video file as an asset (poster = `poster`), as video import will. */
+    putVideoAsset: (id: string, poster: HTMLCanvasElement | ImageBitmap, file: Blob) => void assetStore.put(id, poster, { blob: file }),
+  },
   setTime: (t: number) => useEditor.getState().setTime(t),
   select: (id: string | null) => useEditor.getState().select(id),
   box: (id: string) => {
