@@ -8,7 +8,7 @@ import {
   type Tilt,
 } from '@/doc';
 import { frameBarHeight } from '@/doc';
-import { offsetProp, scaleProp, type Prop } from '@/doc';
+import { isPlaced, offsetProp, scaleProp, type Prop } from '@/doc';
 
 export const CANVAS_PRESETS = [
   { id: '16:9', label: '16:9', width: 1920, height: 1080 },
@@ -102,7 +102,7 @@ export function resizeCompPatches(doc: Doc, width: number, height: number): Patc
     { path: ['comp', 'height'], value: height },
   ];
   doc.comp.layers.forEach((l, i) => {
-    if (l.type === 'background') return;
+    if (!isPlaced(l)) return;
     const base = ['comp', 'layers', i, 'transform'];
     // new = newCentre + (old − oldCentre)·k, applied to every keyframe.
     const remap = (p: Prop<number>, from: number, to: number): Prop<number> => offsetProp(scaleProp(offsetProp(p, -from), k), to);

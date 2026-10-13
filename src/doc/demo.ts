@@ -23,6 +23,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           visible: true,
           locked: true,
           opacity: { static: 1 },
+          effects: [],
           fill: {
             kind: 'linear',
             angle: 135,
@@ -50,6 +51,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           tilt: NO_TILT,
           motion: NO_MOTION,
           opacity: { track: { keys: [{ t: 0, v: 0, out: Easings.easeOutCubic }, { t: 0.8, v: 1, out: Easings.linear }] } },
+          effects: [],
           transform: {
             x: { static: 960 },
             y: { track: { keys: [{ t: 0, v: 700, out: Easings.easeOutCubic }, { t: 1, v: 640, out: Easings.linear }] } },
@@ -75,6 +77,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           align: 'center',
           tracking: -0.02,
           opacity: { static: 1 },
+          effects: [],
           glow: { track: { keys: [{ t: 0.4, v: 0, out: Easings.easeOutCubic }, { t: 1.6, v: 0.8, out: Easings.easeInOutCubic }, { t: 3, v: 0.25, out: Easings.linear }] } },
           glowColor: [1, 0.85, 1, 1],
           transform: { x: { static: 960 }, y: { static: 150 }, scale: { static: 1 }, rotation: { static: 0 } },

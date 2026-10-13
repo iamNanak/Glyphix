@@ -4,7 +4,7 @@
 import type { Motion } from './motion';
 
 /** Bump when the saved document shape changes, and add a migration in migrations.ts. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export type Easing =
   | { kind: 'linear' }
@@ -35,12 +35,37 @@ export interface GradientStop {
   color: Color;
 }
 
+export type EffectKind =
+  | 'blur'
+  | 'glow'
+  | 'shadow'
+  | 'grain'
+  | 'displace'
+  | 'glitch'
+  | 'rgbSplit'
+  | 'gradientMap'
+  | 'dissolve'
+  | 'pixelate'
+  | 'vignette'
+  | 'colorAdjust';
+
+/** One GPU effect in a layer's stack. Parameters are listed per kind in effects.ts. */
+export interface Effect {
+  id: string;
+  kind: EffectKind;
+  enabled: boolean;
+  params: Record<string, Prop<number>>;
+  colors: Record<string, Color>;
+}
+
 export interface LayerBase {
   id: string;
   name: string;
   visible: boolean;
   locked: boolean;
   opacity: Prop<number>;
+  /** Applied in order, bottom of the list last. */
+  effects: Effect[];
 }
 
 export interface Transform {
@@ -247,7 +272,17 @@ export interface TextLayer extends LayerBase {
   glowColor: Color;
 }
 
-export type Layer = BackgroundLayer | ImageLayer | TextLayer;
+/** Applies its effects to everything below it; opacity mixes the result with the unprocessed image. */
+export interface AdjustmentLayer extends LayerBase {
+  type: 'adjustment';
+}
+
+export type Layer = BackgroundLayer | ImageLayer | TextLayer | AdjustmentLayer;
+
+/** Layers that sit somewhere on the canvas and can be moved, scaled and animated. */
+export type PlacedLayer = ImageLayer | TextLayer;
+
+export const isPlaced = (l: Layer | undefined | null): l is PlacedLayer => !!l && (l.type === 'image' || l.type === 'text');
 
 export interface Comp {
   width: number;

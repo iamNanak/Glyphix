@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { AnimationSection, ORDER_OPTIONS } from './AnimationSection';
+import { EffectsSection } from './EffectsSection';
 import { FontPicker } from './FontPicker';
 import { Switch } from '@/components/wensity/switch';
 import { fontLibrary } from '@/text/fontLibrary';
@@ -8,7 +9,9 @@ import { CropSection, TransformSection } from './TransformSection';
 import {
   Easings,
   isGlyphPreset,
+  isPlaced,
   NO_TILT,
+  type AdjustmentLayer,
   type BackgroundFill,
   type BackgroundLayer,
   type Color,
@@ -55,7 +58,7 @@ function sameIgnoringPositions(a: Doc, b: Doc): boolean {
   return a.comp.layers.every((la, i) => {
     const lb = b.comp.layers[i]!;
     if (la === lb) return true;
-    if (la.type === 'background' || lb.type === 'background' || la.id !== lb.id) return false;
+    if (!isPlaced(la) || !isPlaced(lb) || la.id !== lb.id) return false;
     const keys = new Set([...Object.keys(la), ...Object.keys(lb)]);
     for (const k of keys) {
       const va = (la as unknown as Record<string, unknown>)[k];
@@ -91,10 +94,15 @@ export function Inspector() {
         <>
           <CanvasSection />
           {bg && <BackgroundSection layer={bg} index={layerIndex(doc, bg.id)} />}
+          {bg && <BackgroundEffects layer={bg} index={layerIndex(doc, bg.id)} />}
         </>
       )}
     </aside>
   );
+}
+
+function BackgroundEffects({ layer, index }: { layer: BackgroundLayer; index: number }) {
+  return <EffectsSection layer={layer} edit={useEdit(layer, index)} title="Background effects" />;
 }
 
 function useEdit(layer: Layer, index: number): Edit {
@@ -106,7 +114,23 @@ function useEdit(layer: Layer, index: number): Edit {
 
 function LayerInspector({ layer, index }: { layer: Exclude<Layer, BackgroundLayer>; index: number }) {
   const edit = useEdit(layer, index);
+  if (layer.type === 'adjustment') return <AdjustmentInspector layer={layer} edit={edit} />;
   return layer.type === 'text' ? <TextInspector layer={layer} edit={edit} /> : <ImageInspector layer={layer} index={index} edit={edit} />;
+}
+
+function AdjustmentInspector({ layer, edit }: { layer: AdjustmentLayer; edit: Edit }) {
+  const opacity = 'static' in layer.opacity ? layer.opacity.static : null;
+  return (
+    <>
+      <Section title="Adjustment layer">
+        <p className="text-xs leading-relaxed text-dim">Effects here apply to every layer below this one.</p>
+        {opacity !== null && (
+          <SliderField label="Amount" hint={`${Math.round(opacity * 100)}%`} min={0} max={1} step={0.01} value={opacity} onValueChange={(v) => edit('Adjustment amount', ['opacity'], { static: v })} />
+        )}
+      </Section>
+      <EffectsSection layer={layer} edit={edit} />
+    </>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +376,7 @@ function ImageInspector({ layer, index, edit }: { layer: ImageLayer; index: numb
             onValueChange={(v) => edit('Perspective', ['tilt', 'perspective'], v)} />
       </Section>
       <AnimationSection layer={layer} edit={edit} />
+      <EffectsSection layer={layer} edit={edit} />
     </>
   );
 }
@@ -412,6 +437,7 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
       </Section>
 
       <AnimationSection layer={layer} edit={edit} />
+      <EffectsSection layer={layer} edit={edit} />
 
       <Section title="Fill">
         <Segmented

@@ -17,6 +17,7 @@ import { assetStore, pickLevel } from '@/assets/assetStore';
 import { ATLAS_SPREAD_EM, fontLibrary, type LaidOutGlyph, type TextLayout } from '@/text/fontLibrary';
 import { drawFrameBar } from '@/styling/frameBar';
 import { getSharedDevice } from './gpuDevice';
+import { Compositor, type CompositeStep } from './compositor';
 import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
 import { BG_MODE, blankTexture, createBackgroundMaterial, createImageMaterial, createShadowMaterial, tiltPlane } from './materials';
 import {
@@ -573,6 +574,7 @@ export class ThreeBackend implements RenderBackend {
   private textures: TextureCache;
   private bars = new FrameBarCache();
   private bufferSize = new THREE.Vector2();
+  private compositor: Compositor;
   private cssSize = { width: 1, height: 1 };
   private view: View | null = null;
   private atlas: THREE.DataArrayTexture;
@@ -587,6 +589,7 @@ export class ThreeBackend implements RenderBackend {
     fullResAssets: boolean,
   ) {
     this.textures = new TextureCache(fullResAssets);
+    this.compositor = new Compositor(renderer);
     this.atlas = this.makeAtlas();
     renderer.onDeviceLost = (info) => {
       console.error('[glyphix] GPU device lost', info);
@@ -653,6 +656,7 @@ export class ThreeBackend implements RenderBackend {
     const seen = new Set<string>();
     const gen = fontLibrary.generation;
     list.items.forEach((item, order) => {
+      if (item.kind === 'adjustment') return;
       const nodeKey = `${item.kind}:${item.id}`;
       seen.add(nodeKey);
       let node = this.nodes.get(nodeKey);
@@ -669,7 +673,7 @@ export class ThreeBackend implements RenderBackend {
     // glyph rects, so lay them out again before drawing (keeps preview = export).
     if (fontLibrary.generation !== gen) {
       ctx.stats.glyphs = 0;
-      list.items.forEach((item) => this.nodes.get(`${item.kind}:${item.id}`)!.update(item, ctx));
+      list.items.forEach((item) => item.kind !== 'adjustment' && this.nodes.get(`${item.kind}:${item.id}`)!.update(item, ctx));
     }
     for (const [key, node] of this.nodes) {
       if (!seen.has(key)) {
@@ -682,26 +686,82 @@ export class ThreeBackend implements RenderBackend {
     this.syncAtlas();
     this.lastStats = ctx.stats;
     const r = this.renderer;
-    if (v) {
+    const steps = this.compositeSteps(list);
+    if (steps) {
+      const accum = this.composite(list, steps, x0, y0, ctx.pxPerUnit);
+      r.setRenderTarget(null);
+      r.autoClear = !v;
+      if (v) this.withArtboardScissor(v, list, () => this.compositor.present(accum));
+      else this.compositor.present(accum);
+      this.compositor.endFrame();
+    } else if (v) {
       // Preview: clip to the artboard so the preview never shows what the export would crop.
       // Clear the whole canvas first: WebGL's clear honours the scissor rect.
       r.autoClear = false;
-      r.setScissorTest(false);
-      r.clear();
-      const sx0 = Math.max(0, Math.floor(v.offsetX));
-      const sy0 = Math.max(0, Math.floor(v.offsetY));
-      const sx1 = Math.min(this.cssSize.width, Math.ceil(v.offsetX + list.width * v.zoom));
-      const sy1 = Math.min(this.cssSize.height, Math.ceil(v.offsetY + list.height * v.zoom));
-      r.setScissor(sx0, sy0, Math.max(0, sx1 - sx0), Math.max(0, sy1 - sy0));
-      r.setScissorTest(true);
-      r.render(this.scene, this.camera);
-      r.setScissorTest(false);
+      this.withArtboardScissor(v, list, () => r.render(this.scene, this.camera));
     } else {
       r.autoClear = true;
       r.render(this.scene, this.camera);
     }
     this.textures.endFrame();
     this.bars.endFrame();
+  }
+
+  /** null = nothing needs offscreen compositing: draw the scene straight to the canvas (Phase 1 path). */
+  private compositeSteps(list: RenderList): CompositeStep[] | null {
+    if (!list.items.some((i) => i.effects.length > 0)) return null;
+    const steps: CompositeStep[] = [];
+    list.items.forEach((item, i) => {
+      if (item.kind === 'adjustment') steps.push({ kind: 'adjust', effects: item.effects, opacity: item.opacity });
+      else if (item.effects.length) steps.push({ kind: 'layer', node: i, effects: item.effects });
+      else {
+        const last = steps[steps.length - 1];
+        if (last?.kind === 'draw') last.nodes.push(i);
+        else steps.push({ kind: 'draw', nodes: [i] });
+      }
+    });
+    return steps;
+  }
+
+  private composite(list: RenderList, steps: CompositeStep[], x0: number, y0: number, pxPerUnit: number) {
+    const keys = list.items.map((item) => `${item.kind}:${item.id}`);
+    const wanted = new Map<THREE.Object3D, boolean>();
+    for (const node of this.nodes.values()) wanted.set(node.root, node.root.visible);
+    const accum = this.compositor.run(
+      {
+        width: this.bufferSize.x,
+        height: this.bufferSize.y,
+        pxPerUnit,
+        originX: -x0 * pxPerUnit,
+        originY: -y0 * pxPerUnit,
+        compWidth: list.width,
+        compHeight: list.height,
+        t: list.t,
+      },
+      steps,
+      (indices) => {
+        const on = new Set(indices.map((i) => keys[i]));
+        for (const [key, node] of this.nodes) node.root.visible = on.has(key) && wanted.get(node.root)!;
+        this.renderer.render(this.scene, this.camera);
+      },
+    );
+    for (const [root, vis] of wanted) root.visible = vis;
+    return accum;
+  }
+
+  /** Preview: clear the whole canvas, then draw only inside the artboard. */
+  private withArtboardScissor(v: View, list: RenderList, draw: () => void) {
+    const r = this.renderer;
+    r.setScissorTest(false);
+    r.clear();
+    const sx0 = Math.max(0, Math.floor(v.offsetX));
+    const sy0 = Math.max(0, Math.floor(v.offsetY));
+    const sx1 = Math.min(this.cssSize.width, Math.ceil(v.offsetX + list.width * v.zoom));
+    const sy1 = Math.min(this.cssSize.height, Math.ceil(v.offsetY + list.height * v.zoom));
+    r.setScissor(sx0, sy0, Math.max(0, sx1 - sx0), Math.max(0, sy1 - sy0));
+    r.setScissorTest(true);
+    draw();
+    r.setScissorTest(false);
   }
 
   private makeAtlas(): THREE.DataArrayTexture {
@@ -754,6 +814,7 @@ export class ThreeBackend implements RenderBackend {
     this.nodes.clear();
     this.textures.dispose();
     this.bars.dispose();
+    this.compositor.dispose();
     this.atlas.dispose();
     this.renderer.dispose();
   }

@@ -59,6 +59,11 @@ const MIGRATIONS: Record<number, (doc: Json) => Json> = {
     });
     return { ...doc, comp: { ...comp, layers } };
   },
+  // v3 → v4: every layer gains an effect stack.
+  3: (doc) => {
+    const comp = doc.comp as Json & { layers: Json[] };
+    return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => ({ effects: [], ...l })) } };
+  },
 };
 
 export class NewerSchemaError extends Error {

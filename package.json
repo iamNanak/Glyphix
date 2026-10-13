@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "smoke": "node scripts/smoke.mjs",
     "bench": "node scripts/bench.mjs",
-    "e2e": "node scripts/e2e-editor.mjs && node scripts/e2e-styling.mjs && node scripts/e2e-motion.mjs && node scripts/e2e-persistence.mjs && node scripts/e2e-projects.mjs && node scripts/e2e-export.mjs && node scripts/e2e-keyboard.mjs && node scripts/e2e-typography.mjs"
+    "e2e": "node scripts/e2e-editor.mjs && node scripts/e2e-styling.mjs && node scripts/e2e-motion.mjs && node scripts/e2e-persistence.mjs && node scripts/e2e-projects.mjs && node scripts/e2e-export.mjs && node scripts/e2e-keyboard.mjs && node scripts/e2e-typography.mjs && node scripts/e2e-effects.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",

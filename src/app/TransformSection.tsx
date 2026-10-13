@@ -1,5 +1,5 @@
 // Numeric transform + crop: everything the canvas handles do, reachable by keyboard.
-import { offsetProp, sampleProp, scaleProp, type CropRect, type ImageLayer, type TextLayer } from '@/doc';
+import { isPlaced, offsetProp, sampleProp, scaleProp, type CropRect, type ImageLayer, type TextLayer } from '@/doc';
 import { useEditor } from './store';
 import { Field, inputClass, Section, SliderField } from './ui';
 
@@ -27,7 +27,7 @@ export function TransformSection({ layer, edit }: { layer: ImageLayer | TextLaye
   // The inspector ignores position-only changes (fast drags); this small section follows them live.
   const tr = useEditor((st) => {
     const l = st.doc.comp.layers.find((x) => x.id === layer.id);
-    return l && l.type !== 'background' ? l.transform : layer.transform;
+    return isPlaced(l) ? l.transform : layer.transform;
   });
   // Values shown at the end of the timeline = the layer's resting pose (after any keyframes).
   const rest = Number.POSITIVE_INFINITY;

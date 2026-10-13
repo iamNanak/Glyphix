@@ -10,3 +10,4 @@ export * from './frame';
 export * from './motion';
 export * from './migrations';
 export * from './assets';
+export * from './effects';

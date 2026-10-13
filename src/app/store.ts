@@ -11,6 +11,8 @@ import {
   type Doc,
   type HistoryEntry,
   createTextLayer,
+  createAdjustmentLayer,
+  isPlaced,
   type Layer,
   type Motion,
   type Patch,
@@ -51,6 +53,8 @@ interface EditorState {
   setPreview(preview: { layerId: string; motion: Motion } | null): void;
   /** Add a text layer at the centre of the comp and select it. */
   addText(): void;
+  /** Add an adjustment layer above the selected layer (or on top) and select it. */
+  addAdjustment(): void;
 
   // Layer operations (all undoable)
   removeLayer(id: string): void;
@@ -119,6 +123,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().commit(makeInsert(LAYERS, doc.comp.layers.length, layer, 'Add text'));
     set({ selectedId: layer.id });
   },
+  addAdjustment() {
+    const { doc, selectedId } = get();
+    const layer = createAdjustmentLayer();
+    const sel = selectedId ? layerIndex(doc, selectedId) : -1;
+    get().commit(makeInsert(LAYERS, sel >= 0 ? sel + 1 : doc.comp.layers.length, layer, 'Add adjustment layer'));
+    set({ selectedId: layer.id });
+  },
 
   removeLayer(id) {
     const { doc } = get();
@@ -133,13 +144,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     const src = doc.comp.layers[i];
     if (!src || src.type === 'background') return;
     const copy = structuredClone(src);
-    const dup: Layer = {
-      ...copy,
-      id: newLayerId(src.type),
-      name: `${src.name} copy`,
-      locked: false,
-      transform: { ...copy.transform, x: offsetProp(copy.transform.x, 40), y: offsetProp(copy.transform.y, 40) },
-    };
+    const newId = newLayerId(src.type);
+    const dup: Layer = isPlaced(copy)
+      ? { ...copy, id: newId, name: `${src.name} copy`, locked: false, transform: { ...copy.transform, x: offsetProp(copy.transform.x, 40), y: offsetProp(copy.transform.y, 40) } }
+      : { ...copy, id: newId, name: `${src.name} copy`, locked: false };
     get().commit(makeInsert(LAYERS, i + 1, dup, 'Duplicate layer'));
     set({ selectedId: dup.id });
   },
@@ -176,7 +184,7 @@ export function previewDoc(doc: Doc, preview: EditorState['preview']): Doc {
   if (!preview) return doc;
   const i = layerIndex(doc, preview.layerId);
   const layer = doc.comp.layers[i];
-  if (!layer || layer.type === 'background') return doc;
+  if (!isPlaced(layer)) return doc;
   const layers = doc.comp.layers.slice();
   layers[i] = { ...layer, motion: preview.motion };
   return { ...doc, comp: { ...doc.comp, layers } };

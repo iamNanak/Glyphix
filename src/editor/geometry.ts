@@ -1,6 +1,6 @@
 // Pure editor geometry in comp space (px, y down, rotation clockwise in degrees).
 // Hit-testing and handles use un-animated-by-effects CPU geometry — never GPU readback.
-import { sampleProp, type Doc, type Layer } from '@/doc';
+import { isPlaced, sampleProp, type Doc, type Layer } from '@/doc';
 
 export interface Vec {
   x: number;
@@ -38,7 +38,7 @@ export function rotate(v: Vec, deg: number): Vec {
 export type FrameHeight = (layer: Extract<Layer, { type: 'image' }>) => number;
 
 export function layerBox(layer: Layer, t: number, measure: MeasureText, frameHeight: FrameHeight = () => 0): OBox | null {
-  if (layer.type === 'background') return null;
+  if (!isPlaced(layer)) return null;
   const s = sampleProp(layer.transform.scale, t);
   const cx = sampleProp(layer.transform.x, t);
   const cy = sampleProp(layer.transform.y, t);

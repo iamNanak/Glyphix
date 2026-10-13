@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Type, Undo2 } from 'lucide-react';
+import { Activity, Blend, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Type, Undo2 } from 'lucide-react';
 import { flushSave, useSaveStatus } from '@/persistence/autosave';
 import { openProjectFile, saveProjectFile } from '@/persistence/actions';
 import { PROJECT_EXTENSION } from '@/persistence/projectFile';
@@ -13,7 +13,7 @@ import { Button, IconButton, inputClass, SelectField } from './ui';
 import { Slider } from '@/components/wensity/slider';
 import { Switch } from '@/components/wensity/switch';
 import { importImage } from '@/assets/assetStore';
-import { createImageLayer, fitSize, makeInsert, offsetProp } from '@/doc';
+import { createImageLayer, fitSize, isPlaced, makeInsert, offsetProp } from '@/doc';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
 import { layerIndex, previewDoc } from './store';
@@ -134,6 +134,9 @@ function Toolbar({ backend, onProjects, onExport }: { backend: string; onProject
       <span className="mx-1 h-5 w-px bg-line" aria-hidden />
       <IconButton label="Add text" shortcut="T" onClick={() => useEditor.getState().addText()}>
         <Type size={16} />
+      </IconButton>
+      <IconButton label="Add adjustment layer" onClick={() => useEditor.getState().addAdjustment()}>
+        <Blend size={16} />
       </IconButton>
 
       <div className="ml-auto flex items-center gap-2">
@@ -285,7 +288,7 @@ function useShortcuts() {
       if (e.key === 'Enter' && sel.type === 'text') return handled(), startTextEdit(sel);
       const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       const dir = arrows[e.key];
-      if (dir && sel.type !== 'background') {
+      if (dir && isPlaced(sel)) {
         handled();
         const step = e.shiftKey ? 10 : 1;
         const i = layerIndex(s.doc, sel.id);

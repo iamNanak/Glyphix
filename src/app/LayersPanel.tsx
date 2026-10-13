@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { Layer } from '@/doc';
-import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Image, Lock, Square, Trash2, Type, Unlock } from 'lucide-react';
+import { Blend, ArrowDown, ArrowUp, Copy, Eye, EyeOff, Image, Lock, Square, Trash2, Type, Unlock } from 'lucide-react';
 import { useEditor } from './store';
 import { IconButton } from './ui';
 
-const icons = { background: Square, image: Image, text: Type } as const;
+const icons = { background: Square, image: Image, text: Type, adjustment: Blend } as const;
 
 export function LayersPanel() {
   // Re-render only when something the panel shows changes (not on every move/scale).

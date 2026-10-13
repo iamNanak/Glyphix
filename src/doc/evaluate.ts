@@ -1,6 +1,8 @@
 import { ease } from './easing';
 import { seededPermutation } from './random';
 import { frameBarHeight } from './frame';
+import { isPlaced } from './types';
+import { isNoOp, resolveEffects, type ResolvedEffect } from './effects';
 import { exitStart, isGlyphPreset, maxRank, glyphAnimatorFor, glyphExitFor, glyphLoopFor, motionModifiers, unitCount, type GlyphLoop, type Modifiers } from './motion';
 import type {
   Color,
@@ -39,6 +41,16 @@ export interface BackgroundItem {
   id: string;
   opacity: number;
   fill: BackgroundFill;
+  /** Enabled effects that change the image, in order; empty = drawn directly. */
+  effects: ResolvedEffect[];
+}
+
+/** Processes everything below it with `effects`; `opacity` mixes the result in. */
+export interface AdjustmentItem {
+  kind: 'adjustment';
+  id: string;
+  opacity: number;
+  effects: ResolvedEffect[];
 }
 
 export interface ImageItem extends ResolvedTransform {
@@ -56,6 +68,7 @@ export interface ImageItem extends ResolvedTransform {
   /** Frame bar height in comp px (scale 1); 0 when there's no frame. */
   frameBar: number;
   tilt: { rotateX: number; rotateY: number; perspective: number };
+  effects: ResolvedEffect[];
 }
 
 export interface TextItem extends ResolvedTransform {
@@ -80,9 +93,10 @@ export interface TextItem extends ResolvedTransform {
   exit: GlyphAnimator | null;
   /** Continuous per-glyph emphasis loop (GPU), or null. */
   loop: GlyphLoop | null;
+  effects: ResolvedEffect[];
 }
 
-export type RenderItem = BackgroundItem | ImageItem | TextItem;
+export type RenderItem = BackgroundItem | ImageItem | TextItem | AdjustmentItem;
 
 export interface RenderList {
   width: number;
@@ -130,9 +144,13 @@ export function evaluate(doc: Doc, t: number): RenderList {
   for (const layer of doc.comp.layers) {
     if (!layer.visible) continue;
     const opacity = sampleProp(layer.opacity, t);
+    const effects = resolveEffects(layer.effects ?? [], t, sampleProp).filter((e) => !isNoOp(e));
     switch (layer.type) {
       case 'background':
-        items.push({ kind: 'background', id: layer.id, opacity, fill: layer.fill });
+        items.push({ kind: 'background', id: layer.id, opacity, fill: layer.fill, effects });
+        break;
+      case 'adjustment':
+        if (effects.length && opacity > 0) items.push({ kind: 'adjustment', id: layer.id, opacity, effects });
         break;
       case 'image': {
         const m = motionModifiers(layer.motion, t, doc.comp, 'image');
@@ -155,6 +173,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
             rotateY: sampleProp(layer.tilt.rotateY, t) + m.tiltY,
             perspective: layer.tilt.perspective,
           },
+          effects,
           ...tr,
         });
         break;
@@ -182,6 +201,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
           enter: (enter && glyphAnimatorFor(enter, layer.text)) ?? layer.animator,
           exit: exit && glyphExitFor(exit, layer.text, doc.comp),
           loop: glyphLoopFor(loop, layer.fontSize),
+          effects,
           ...applyModifiers(resolveTransform(layer.transform, t), m),
         });
         break;
@@ -313,7 +333,7 @@ export function posterTime(doc: Doc): number {
   let entered = 0;
   let exiting = comp.duration;
   for (const l of comp.layers) {
-    if (l.type === 'background' || !l.visible) continue;
+    if (!isPlaced(l) || !l.visible) continue;
     const { enter, exit } = l.motion;
     if (l.type === 'text') entered = Math.max(entered, Math.min(comp.duration, restTime({ ...l, motion: { ...l.motion, exit: null } }, comp)));
     else if (enter) entered = Math.max(entered, enter.start + enter.duration);

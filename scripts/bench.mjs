@@ -17,7 +17,7 @@ const stats = async () =>
 for (const webgl of [false, true]) {
   await page.goto(`${base}/${webgl ? '?webgl' : ''}#/bench`);
   await page.waitForTimeout(1500);
-  for (const scene of ['Demo', '300 glyphs', '1000 glyphs', '300 glyphs, enter + exit + wave', '4K + 10 layers']) {
+  for (const scene of ['Demo', '300 glyphs', '1000 glyphs', '300 glyphs, enter + exit + wave', '4K + 10 layers', '4K layer + 3 effects']) {
     await page.getByRole('button', { name: scene, exact: true }).click();
     // Rolling window = last 240 frames (~4 s); wait longer so one-time work (shader compiles,
     // texture uploads) after switching scene falls outside it.

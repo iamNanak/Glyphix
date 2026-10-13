@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { restTime, offsetProp, sampleProp, scaleProp, type Doc, type ImageLayer, type Layer, type Patch, type TextLayer } from '@/doc';
+import { isPlaced, restTime, offsetProp, sampleProp, scaleProp, type Doc, type ImageLayer, type Layer, type Patch, type TextLayer } from '@/doc';
 import { fontLibrary } from '@/text/fontLibrary';
 import { layerIndex, useEditor } from '@/app/store';
 import { toComp, toScreen, useView } from './viewStore';
@@ -37,7 +37,7 @@ type Drag =
   | { kind: 'crop'; index: number; layer: ImageLayer; startBox: OBox; edge: Edge }
   | { kind: 'pan'; last: Vec };
 
-const transformOf = (l: Layer) => (l.type === 'background' ? null : l.transform);
+const transformOf = (l: Layer) => (isPlaced(l) ? l.transform : null);
 
 /** Interaction layer over the canvas. Everything is computed on the CPU from the document. */
 export function Overlay() {

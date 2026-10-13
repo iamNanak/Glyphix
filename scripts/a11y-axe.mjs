@@ -38,5 +38,22 @@ await audit('outline, shadow, gradient controls');
 await page.getByRole('button', { name: /^Font:/ }).click();
 await page.waitForTimeout(800);
 await audit('font picker open');
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+// Effects: menu open, then cards with every control kind (sliders, keyframes, colours, toggles).
+await page.getByRole('button', { name: 'Add effect' }).click();
+await page.waitForTimeout(400);
+await audit('add effect menu open');
+await page.getByRole('menuitem', { name: /^Glow/ }).click();
+for (const fx of ['Grain', 'Gradient map']) {
+  await page.getByRole('button', { name: 'Add effect' }).click();
+  await page.getByRole('menuitem', { name: new RegExp(`^${fx}`) }).click();
+}
+await page.getByRole('button', { name: 'Add Glow radius keyframe at playhead' }).click();
+await page.waitForTimeout(300);
+await audit('effect cards (glow keyframed, grain, gradient map)');
+await page.getByRole('button', { name: 'Add adjustment layer' }).click();
+await page.waitForTimeout(300);
+await audit('adjustment layer selected');
 await browser.close();
 process.exit(failures ? 1 : 0);

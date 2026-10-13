@@ -1,4 +1,4 @@
-import { createDemoDoc, defaultEnter, defaultExit, defaultLoop, Easings, REST_POSE, type Doc, type ImageLayer, type TextLayer } from '@/doc';
+import { createDemoDoc, createEffect, defaultEnter, defaultExit, defaultLoop, Easings, REST_POSE, type Doc, type ImageLayer, type TextLayer } from '@/doc';
 import { assetStore } from '@/assets/assetStore';
 import { createDemoScreenshot } from '@/assets/demoScreenshot';
 
@@ -100,12 +100,38 @@ function bigScene(): Doc {
   return doc;
 }
 
+/** One 4K image with three effects (blur-based glow, animated displacement, animated grain). */
+function fxScene(): Doc {
+  const doc = createDemoDoc();
+  doc.name = '4K layer + 3 effects';
+  doc.comp.width = 3840;
+  doc.comp.height = 2160;
+  const shot = doc.comp.layers.find((l) => l.id === 'shot') as ImageLayer;
+  const id = 'bench-4k-fx';
+  if (!assetStore.get(id)) assetStore.put(id, createDemoScreenshot(1920, 1080, 2));
+  const glow = createEffect('glow');
+  glow.params.radius = { static: 40 };
+  const displace = createEffect('displace');
+  displace.params.speed = { static: 1 };
+  Object.assign(shot, {
+    assetId: id,
+    width: 3200,
+    height: 1800,
+    effects: [glow, displace, createEffect('grain')],
+    transform: { ...shot.transform, x: { static: 1920 }, y: { static: 1140 }, rotation: { track: { keys: [{ t: 0, v: -2, out: Easings.easeInOutCubic }, { t: 2.5, v: 2, out: Easings.easeInOutCubic }, { t: 5, v: -2, out: Easings.linear }] } } },
+  });
+  const headline = doc.comp.layers.find((l) => l.id === 'headline') as TextLayer;
+  Object.assign(headline, { fontSize: 160, transform: { ...headline.transform, x: { static: 1920 }, y: { static: 140 } } });
+  return doc;
+}
+
 export const SCENES: Record<string, { label: string; build: () => Doc }> = {
   demo: { label: 'Demo', build: () => createDemoDoc() },
   g300: { label: '300 glyphs', build: () => glyphScene(300) },
   g1000: { label: '1000 glyphs', build: () => glyphScene(1000) },
   k300: { label: '300 glyphs, enter + exit + wave', build: () => glyphScene(300, true) },
   big: { label: '4K + 10 layers', build: bigScene },
+  fx: { label: '4K layer + 3 effects', build: fxScene },
 };
 
 /** Rough VRAM estimate in MB: textures (with mips) + glyph atlas + drawing buffer. */
