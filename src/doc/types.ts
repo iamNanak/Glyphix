@@ -4,7 +4,7 @@
 import type { Motion } from './motion';
 
 /** Bump when the saved document shape changes, and add a migration in migrations.ts. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export type Easing =
   | { kind: 'linear' }
@@ -135,9 +135,27 @@ export interface Tilt {
   perspective: number;
 }
 
+/**
+ * Timing of a video placed on an image layer. Times in seconds.
+ * The clip shows source time `in` at comp time `start` and plays to source time `out`.
+ * Outside that range it holds the first / last frame (or repeats when `loop`).
+ */
+export interface VideoClip {
+  start: number;
+  in: number;
+  out: number;
+  loop: boolean;
+  /** 0..1 */
+  volume: number;
+  muted: boolean;
+}
+
 export interface ImageLayer extends LayerBase {
   type: 'image';
+  /** An image asset, or a video asset (`vid-…`) when `video` is set. */
   assetId: string;
+  /** Set when the layer shows a video; the frame comes from `assetId` at the clip's source time. */
+  video: VideoClip | null;
   crop: CropRect;
   /** Displayed size of the (cropped) image in comp pixels, before transform.scale. Excludes the frame bar. */
   width: number;

@@ -4,3 +4,4 @@ dist
 .vite
 RESEARCH.md
 *.tsbuildinfo
+scripts/fixtures/

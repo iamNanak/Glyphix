@@ -21,6 +21,7 @@ export function createImageLayer(comp: Comp, assetId: string, srcW: number, srcH
     visible: true,
     locked: false,
     assetId,
+    video: null,
     crop: FULL_CROP,
     width,
     height,

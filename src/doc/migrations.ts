@@ -64,6 +64,11 @@ const MIGRATIONS: Record<number, (doc: Json) => Json> = {
     const comp = doc.comp as Json & { layers: Json[] };
     return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => ({ effects: [], ...l })) } };
   },
+  // v4 → v5: image layers can show a video.
+  4: (doc) => {
+    const comp = doc.comp as Json & { layers: Json[] };
+    return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => (l.type === 'image' ? { video: null, ...l } : l)) } };
+  },
 };
 
 export class NewerSchemaError extends Error {

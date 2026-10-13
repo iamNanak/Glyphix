@@ -41,6 +41,7 @@ export function createDemoDoc(headline = 'Ship visuals that move'): Doc {
           visible: true,
           locked: false,
           assetId: DEMO_SCREENSHOT_ASSET,
+          video: null,
           crop: FULL_CROP,
           width: 1280,
           height: 760,

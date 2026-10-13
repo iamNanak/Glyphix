@@ -13,6 +13,7 @@ import {
   resolveEffects,
   sampleProp,
   setValueAt,
+  SCHEMA_VERSION,
   type Prop,
 } from '.';
 
@@ -59,7 +60,7 @@ describe('effects', () => {
     v3.schemaVersion = 3;
     v3.comp.layers.forEach((l) => delete l.effects);
     const doc = migrate(v3);
-    expect(doc.schemaVersion).toBe(4);
+    expect(doc.schemaVersion).toBe(SCHEMA_VERSION);
     doc.comp.layers.forEach((l) => expect(l.effects).toEqual([]));
   });
 });

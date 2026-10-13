@@ -3,6 +3,7 @@ import { seededPermutation } from './random';
 import { frameBarHeight } from './frame';
 import { isPlaced } from './types';
 import { isNoOp, resolveEffects, type ResolvedEffect } from './effects';
+import { videoSourceTime } from './video';
 import { exitStart, isGlyphPreset, maxRank, glyphAnimatorFor, glyphExitFor, glyphLoopFor, motionModifiers, unitCount, type GlyphLoop, type Modifiers } from './motion';
 import type {
   Color,
@@ -69,6 +70,8 @@ export interface ImageItem extends ResolvedTransform {
   frameBar: number;
   tilt: { rotateX: number; rotateY: number; perspective: number };
   effects: ResolvedEffect[];
+  /** Video layers: which source frame to show (seconds into the file). */
+  video: { time: number } | null;
 }
 
 export interface TextItem extends ResolvedTransform {
@@ -174,6 +177,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
             perspective: layer.tilt.perspective,
           },
           effects,
+          video: layer.video ? { time: videoSourceTime(layer.video, t) } : null,
           ...tr,
         });
         break;

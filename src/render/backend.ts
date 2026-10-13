@@ -1,4 +1,5 @@
 import type { RenderList } from '@/doc';
+import type { VideoFrameProvider } from '@/video/provider';
 
 export type BackendKind = 'webgpu' | 'webgl2';
 
@@ -24,6 +25,8 @@ export interface RenderBackend {
   setSize(width: number, height: number, pixelRatio: number): void;
   /** null = the comp exactly fills the canvas (export). */
   setView(view: View | null): void;
+  /** Await before render(list) so video layers show their exact frame (no-op without video). */
+  prepare(list: RenderList): Promise<void>;
   render(list: RenderList): void;
   stats(): RenderStats;
   /** Called when the GPU device/context is lost and the backend is unusable. */
@@ -40,6 +43,8 @@ export interface CreateBackendOptions {
   preserveDrawingBuffer?: boolean;
   /** Always sample full-resolution assets (export). Preview picks ½/¼ proxies by on-screen size. */
   fullResAssets?: boolean;
+  /** Video frames. Default: frame-exact decoding (export, thumbnails, tests); the editor passes its live provider. */
+  frames?: VideoFrameProvider;
 }
 
 export async function createBackend(opts: CreateBackendOptions = {}): Promise<RenderBackend> {

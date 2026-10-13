@@ -32,7 +32,9 @@ async function prepare(doc: Doc, opts: ExportOptions): Promise<{ backend: Render
 
 /** Render one frame and snapshot it synchronously (WebGPU canvases are only readable in the same task). */
 export async function renderFrameBitmap(backend: RenderBackend, doc: Doc, t: number): Promise<ImageBitmap> {
-  backend.render(evaluate(doc, t));
+  const list = evaluate(doc, t);
+  await backend.prepare(list);
+  backend.render(list);
   return createImageBitmap(backend.canvas);
 }
 
@@ -110,7 +112,9 @@ export async function exportVideo(doc: Doc, opts: ExportOptions = {}): Promise<V
         throw new DOMException('Export cancelled', 'AbortError');
       }
       const t = i / fps;
-      backend.render(evaluate(doc, t));
+      const list = evaluate(doc, t);
+      await backend.prepare(list);
+      backend.render(list);
       await source.add(t, 1 / fps);
       opts.onProgress?.((i + 1) / frames);
     }

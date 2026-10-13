@@ -18,6 +18,8 @@ import { ATLAS_SPREAD_EM, fontLibrary, type LaidOutGlyph, type TextLayout } from
 import { drawFrameBar } from '@/styling/frameBar';
 import { getSharedDevice } from './gpuDevice';
 import { Compositor, type CompositeStep } from './compositor';
+import { createExactFrames } from '@/video/exactFrames';
+import type { FrameImage, VideoFrameProvider } from '@/video/provider';
 import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
 import { BG_MODE, blankTexture, createBackgroundMaterial, createImageMaterial, createShadowMaterial, tiltPlane } from './materials';
 import {
@@ -64,6 +66,7 @@ interface FrameCtx {
   textures: TextureCache;
   /** Device pixels per comp pixel. */
   pxPerUnit: number;
+  frames: VideoFrameProvider;
   stats: { glyphs: number };
 }
 
@@ -232,7 +235,48 @@ class FrameBarCache {
   }
 }
 
+/** One layer's video frame as a GPU texture; re-uploads only when the frame changes. */
+class VideoTex {
+  private tex: THREE.Texture | null = null;
+  private img: FrameImage | null = null;
+  private version = -1;
+  private size = '';
+
+  get(img: FrameImage, version: number): THREE.Texture {
+    const w = img instanceof VideoFrame ? img.displayWidth : (img as { width: number }).width;
+    const h = img instanceof VideoFrame ? img.displayHeight : (img as { height: number }).height;
+    const size = `${w}x${h}|${img instanceof VideoFrame}`;
+    if (!this.tex || size !== this.size) {
+      this.tex?.dispose();
+      this.tex = img instanceof VideoFrame ? new THREE.VideoFrameTexture() : new THREE.Texture();
+      this.tex.colorSpace = THREE.SRGBColorSpace;
+      this.tex.flipY = false;
+      this.tex.generateMipmaps = false;
+      this.tex.minFilter = THREE.LinearFilter;
+      this.tex.magFilter = THREE.LinearFilter;
+      this.size = size;
+      this.img = null;
+    }
+    if (img !== this.img || version !== this.version) {
+      if (this.tex instanceof THREE.VideoFrameTexture) this.tex.setFrame(img as VideoFrame);
+      else {
+        this.tex.image = img as THREE.Texture['image'];
+        this.tex.needsUpdate = true;
+      }
+      this.img = img;
+      this.version = version;
+    }
+    return this.tex;
+  }
+
+  dispose() {
+    this.tex?.dispose();
+    this.tex = null;
+  }
+}
+
 class ImageNode implements LayerNode {
+  private video = new VideoTex();
   readonly root = new THREE.Group();
   private image: ReturnType<typeof createImageMaterial> | null = null;
   private imageMesh: THREE.Mesh | null = null;
@@ -250,7 +294,9 @@ class ImageNode implements LayerNode {
     applyTransform(this.root, item);
     const w = item.width;
     const h = item.height + item.frameBar; // full card height
-    const tex = ctx.textures.get(item.assetId, (w / item.crop.w) * item.scale * ctx.pxPerUnit);
+    const frame = item.video ? ctx.frames.frame(item.id, item.assetId, item.video.time) : null;
+    // Video layers fall back to the asset's poster image until a frame is available.
+    const tex = frame ? this.video.get(frame, ctx.frames.version) : ctx.textures.get(item.assetId, (w / item.crop.w) * item.scale * ctx.pxPerUnit);
     if (tex && !this.image) {
       this.image = createImageMaterial(tex);
       this.imageMesh = new THREE.Mesh(tiltPlane, this.image.mat);
@@ -305,6 +351,7 @@ class ImageNode implements LayerNode {
   dispose() {
     this.image?.mat.dispose();
     this.shadow.mat.dispose();
+    this.video.dispose();
   }
 }
 
@@ -575,6 +622,8 @@ export class ThreeBackend implements RenderBackend {
   private bars = new FrameBarCache();
   private bufferSize = new THREE.Vector2();
   private compositor: Compositor;
+  private frames: VideoFrameProvider;
+  private ownsFrames: boolean;
   private cssSize = { width: 1, height: 1 };
   private view: View | null = null;
   private atlas: THREE.DataArrayTexture;
@@ -587,7 +636,10 @@ export class ThreeBackend implements RenderBackend {
     private renderer: THREE.WebGPURenderer,
     readonly kind: BackendKind,
     fullResAssets: boolean,
+    frames: VideoFrameProvider | undefined,
   ) {
+    this.ownsFrames = !frames;
+    this.frames = frames ?? createExactFrames();
     this.textures = new TextureCache(fullResAssets);
     this.compositor = new Compositor(renderer);
     this.atlas = this.makeAtlas();
@@ -610,7 +662,7 @@ export class ThreeBackend implements RenderBackend {
     renderer.setClearColor(0x000000, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const backend = renderer.backend as { isWebGPUBackend?: boolean };
-    return new ThreeBackend(renderer, backend.isWebGPUBackend ? 'webgpu' : 'webgl2', opts.fullResAssets ?? false);
+    return new ThreeBackend(renderer, backend.isWebGPUBackend ? 'webgpu' : 'webgl2', opts.fullResAssets ?? false, opts.frames);
   }
 
   get canvas() {
@@ -625,6 +677,10 @@ export class ThreeBackend implements RenderBackend {
 
   setView(view: View | null) {
     this.view = view;
+  }
+
+  prepare(list: RenderList): Promise<void> {
+    return list.items.some((i) => i.kind === 'image' && i.video) ? this.frames.prepare(list) : Promise.resolve();
   }
 
   render(list: RenderList) {
@@ -651,6 +707,7 @@ export class ThreeBackend implements RenderBackend {
       height: list.height,
       textures: this.textures,
       pxPerUnit: this.bufferSize.x / (x1 - x0),
+      frames: this.frames,
       stats: { glyphs: 0 },
     };
     const seen = new Set<string>();
@@ -815,6 +872,7 @@ export class ThreeBackend implements RenderBackend {
     this.textures.dispose();
     this.bars.dispose();
     this.compositor.dispose();
+    if (this.ownsFrames) this.frames.dispose();
     this.atlas.dispose();
     this.renderer.dispose();
   }
