@@ -1,7 +1,9 @@
 // Asset store: images keyed by content hash, with ½ and ¼ proxies for fast preview.
 // Originals are kept as compressed blobs (for persistence in Milestone C), never as raw pixels in history.
-// Uploaded fonts are assets too (fontAssets.ts); assetBlob/loadAssetBlob route them by id prefix.
-import { FONT_ASSET_PREFIX } from '@/doc/assets';
+// Uploaded fonts (fontAssets.ts) and videos (video/videoAssets.ts) are assets too; assetBlob/loadAssetBlob
+// route them by id prefix. A video's levels are its poster image; its blob is the original file.
+import { FONT_ASSET_PREFIX, VIDEO_ASSET_PREFIX } from '@/doc/assets';
+import { loadVideoBlob } from '@/video/videoAssets';
 import { fontBlob, loadFontBlob } from './fontAssets';
 
 export type AssetSource = ImageBitmap | HTMLCanvasElement | OffscreenCanvas;
@@ -76,7 +78,7 @@ export function pickLevel(asset: Asset, neededWidth: number): number {
   return 0;
 }
 
-async function sha256Hex(blob: Blob): Promise<string> {
+export async function sha256Hex(blob: Blob): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -97,7 +99,8 @@ export async function decodeImage(blob: Blob): Promise<ImageBitmap> {
   return bmp;
 }
 
-async function makeProxies(full: ImageBitmap): Promise<AssetLevel[]> {
+/** ½ and ¼ size copies for preview (skipped when they'd be small). */
+export async function makeProxies(full: ImageBitmap): Promise<AssetLevel[]> {
   const levels: AssetLevel[] = [];
   let w = full.width;
   let h = full.height;
@@ -133,6 +136,7 @@ export async function importImage(blob: Blob): Promise<ImportedImage> {
 /** Load a stored file back under its original asset id (projects reference assets by id). */
 export async function loadAssetBlob(id: string, blob: Blob): Promise<void> {
   if (id.startsWith(FONT_ASSET_PREFIX)) return loadFontBlob(id, blob);
+  if (id.startsWith(VIDEO_ASSET_PREFIX)) return loadVideoBlob(id, blob);
   await loadImageBlob(id, blob);
 }
 
@@ -149,6 +153,7 @@ export async function assetBlob(id: string): Promise<Blob | null> {
   if (id.startsWith(FONT_ASSET_PREFIX)) return fontBlob(id);
   const asset = assetStore.get(id);
   if (!asset) return null;
+  if (id.startsWith(VIDEO_ASSET_PREFIX)) return asset.blob; // the original file, never the poster
   if (asset.blob) return asset.blob;
   const src = asset.levels[0]!.source;
   const canvas = new OffscreenCanvas(asset.width, asset.height);
