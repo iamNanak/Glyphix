@@ -6,6 +6,7 @@ import { createBackend, type RenderBackend, type RenderStats, type View } from '
 import { frameStats } from '@/bench/frameStats';
 import { fitView } from '@/editor/viewStore';
 import { createPreviewFrames, type PreviewFrames } from '@/video/previewFrames';
+import { PreviewAudio } from '@/video/previewAudio';
 
 interface ViewportProps {
   doc: Doc;
@@ -52,9 +53,9 @@ export function Viewport({ doc, time, playing = false, forceWebGL, view, onHostR
     let disposed = false;
     const markDirty = () => (live.current.dirty = true);
     const frames: PreviewFrames = createPreviewFrames();
-    frames.onFrame = markDirty;
-    // Dev only: tests read live-playback sync stats from here.
-    if (import.meta.env.DEV) (window as { __glyphixFrames?: PreviewFrames }).__glyphixFrames = frames;
+    const audio = new PreviewAudio();
+    // Dev only: tests read playback sync stats from here.
+    if (import.meta.env.DEV) Object.assign(window, { __glyphixFrames: frames, __glyphixAudio: audio });
     // Video frames: render now with what's there, and once more when prepare() brings new frames.
     // One prepare in flight at a time; the latest request wins.
     let preparing = false;
@@ -96,6 +97,8 @@ export function Viewport({ doc, time, playing = false, forceWebGL, view, onHostR
       const t0 = performance.now();
       backend.setView(l.view);
       frames.setPlaying(l.playing);
+      audio.setDoc(l.doc);
+      audio.update(l.playing, l.time);
       const list = evaluate(l.doc, l.time);
       prepare(list);
       backend.render(list);
@@ -126,6 +129,7 @@ export function Viewport({ doc, time, playing = false, forceWebGL, view, onHostR
       unsubs.forEach((u) => u());
       backend?.dispose();
       frames.dispose();
+      audio.dispose();
       canvas.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

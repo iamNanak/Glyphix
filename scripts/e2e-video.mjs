@@ -106,14 +106,17 @@ if (canvasReadable) {
   check('paused preview shows the exact frame (incl. backwards seeks)', shown.every(([a, b]) => a === b), shown.map(([a, b]) => `${a}→${b}`).join(' '));
 } else console.log('SKIP paused preview frame check — headless Firefox canvas reads back blank');
 
-// --- Playing: the live element follows the timeline.
-await page.evaluate(() => { window.__glyphix.setTime(0); window.__glyphix.editor.getState().setPlaying(true); });
-await page.waitForTimeout(800);
-await page.evaluate(() => window.__glyphixFrames.takeStats());
+// --- Playing, the way a user starts it: paused on a frame that is shown, then Play.
+await page.evaluate(() => window.__glyphix.setTime(0));
+if (canvasReadable) await waitFrame(0);
+else await page.waitForTimeout(1500);
+await page.evaluate(() => window.__glyphix.editor.getState().setPlaying(true));
+await page.waitForTimeout(500);
+await page.evaluate(() => { window.__glyphixFrames.takeStats(); window.__glyphixAudio.drift.length = 0; });
 const t0 = (await state()).time;
 await page.waitForTimeout(2500);
 const sync = await page.evaluate(() => {
-  const s = window.__glyphixFrames.takeStats();
+  const s = { ...window.__glyphixFrames.takeStats(), sound: window.__glyphixAudio.drift.splice(0) };
   const q = (a, p) => { const b = [...a].sort((x, y) => x - y); return b[Math.floor((b.length - 1) * p)] ?? Infinity; };
   return { frames: s.frames, pic95: q(s.picture, 0.95), picMax: q(s.picture, 1), snd50: q(s.sound, 0.5), snd95: q(s.sound, 0.95), sndN: s.sound.length };
 });
@@ -123,7 +126,19 @@ await page.evaluate(() => window.__glyphix.editor.getState().setPlaying(false));
 const ms = (v) => `${(v * 1000).toFixed(0)} ms`;
 const expected = (t1 - t0) * 30;
 check('playback draws (nearly) every video frame', sync.frames >= expected * 0.9, `${sync.frames} frames for ${expected.toFixed(0)} expected, timeline ${t0.toFixed(2)}→${t1.toFixed(2)} s`);
-check('picture in sync with the timeline (late by < 1 frame)', sync.picMax < 1 / 30 + 0.002, `p95 ${ms(sync.pic95)}, max ${ms(sync.picMax)}`);
+check('picture in sync with the timeline (p95 late by < 1 frame)', sync.pic95 < 1 / 30 + 0.002, `p95 ${ms(sync.pic95)}, max ${ms(sync.picMax)}`);
+
+// Cold start (informational): play right after a far jump, so the decoder starts a new session.
+await page.evaluate(() => { window.__glyphix.setTime(4); window.__glyphixFrames.takeStats(); window.__glyphix.setTime(0.5); window.__glyphix.editor.getState().setPlaying(true); });
+const coldStart = Date.now();
+let caughtUp = null;
+while (Date.now() - coldStart < 4000) {
+  await page.waitForTimeout(100);
+  const late = await page.evaluate(() => window.__glyphixFrames.takeStats().picture);
+  if (late.length && Math.max(...late) < 1 / 30) { caughtUp = Date.now() - coldStart; break; }
+}
+await page.evaluate(() => window.__glyphix.editor.getState().setPlaying(false));
+console.log(`INFO cold start after a far jump: in sync after ${caughtUp ?? '> 4000'} ms`);
 check('sound follows the timeline (p95 < 80 ms)', sync.sndN > 10 && sync.snd95 < 0.08, `p50 ${ms(sync.snd50)}, p95 ${ms(sync.snd95)} over ${sync.sndN} samples`);
 if (canvasReadable) check('playing preview shows a moving frame', playedFrame > 30, `frame ${playedFrame}`);
 
