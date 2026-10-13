@@ -5,3 +5,4 @@ dist
 RESEARCH.md
 *.tsbuildinfo
 scripts/fixtures/
+.claude/worktrees/
