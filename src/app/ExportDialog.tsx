@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, X } from 'lucide-react';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/wensity/dialog';
 import { Progress } from '@/components/wensity/progress';
 import { Switch } from '@/components/wensity/switch';
+import { audioSegments } from '@/doc';
 import { downloadBlob, runExport, type ExportFormat, type ExportResult, type ExportSettings } from '@/export/exporter';
+import { defaultAsciiEffect, estimateAsciiBytes, frameCount as asciiFrameCount, listAsciiEffects, loadAsciiFontBytes, captureAsciiSequence, runAsciiExport, type AsciiOutput } from '@/export/asciiText';
 import { useEditor } from './store';
 import { Button, PresetGrid, SelectField, SliderField } from './ui';
 
@@ -17,16 +19,28 @@ const FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'png-seq', label: 'PNG sequence (.zip)' },
 ];
 
+/** The ASCII text export is a dialog format of its own (it has no scale, and only exists when the doc has an ASCII effect). */
+const ASCII_FORMAT = 'ascii';
+type DialogFormat = ExportFormat | typeof ASCII_FORMAT;
+type DialogSettings = Omit<ExportSettings, 'time' | 'format'> & { format: DialogFormat };
+const ASCII_OUTPUTS: { value: AsciiOutput; label: string }[] = [
+  { value: 'copy', label: 'Copy frame' },
+  { value: 'txt-zip', label: 'TXT frames (.zip)' },
+  { value: 'json', label: 'JSON' },
+  { value: 'html', label: 'HTML player' },
+  { value: 'react', label: 'React component (.zip)' },
+];
+
 type Kind = 'still' | 'video' | 'sequence' | 'gif';
 const SCALES: Record<Kind, number[]> = { still: [1, 2, 3, 4], video: [0.5, 1, 2], sequence: [0.5, 1, 2], gif: [0.25, 0.5, 0.75, 1] };
 const kind = (f: ExportFormat): Kind => (f === 'mp4' || f === 'webm' ? 'video' : f === 'png-seq' ? 'sequence' : f === 'gif' ? 'gif' : 'still');
 /** H.264/VP9 encoders top out around 4096 px wide on common hardware. */
 const MAX_VIDEO_DIM = 4096;
 
-const DEFAULTS: Omit<ExportSettings, 'time'> = { format: 'png', scale: 1, quality: 0.92, transparent: false, webmTransparent: true, gifFps: 20 };
+const DEFAULTS: DialogSettings = { format: 'png', scale: 1, quality: 0.92, transparent: false, webmTransparent: true, gifFps: 20 };
 const STORAGE_KEY = 'glyphix.exportSettings';
 
-function loadSettings(): Omit<ExportSettings, 'time'> {
+function loadSettings(): DialogSettings {
   try {
     return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as Partial<ExportSettings>) };
   } catch {
@@ -34,7 +48,7 @@ function loadSettings(): Omit<ExportSettings, 'time'> {
   }
 }
 
-function saveSettings(s: Omit<ExportSettings, 'time'>) {
+function saveSettings(s: DialogSettings) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch {
@@ -48,13 +62,23 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const comp = useEditor((s) => s.doc.comp);
   const time = useEditor((s) => s.time);
   const forceWebGL = useEditor((s) => s.forceWebGL);
+  const doc = useEditor((s) => s.doc);
   const [settings, setSettings] = useState(loadSettings);
+  const [ascii, setAscii] = useState<{ effectId: string; output: AsciiOutput; sound: boolean }>({ effectId: '', output: 'copy', sound: false });
+  const [message, setMessage] = useState<string | null>(null);
+  const [estimate, setEstimate] = useState<number | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
 
-  const k = kind(settings.format);
+  const asciiEffects = useMemo(() => listAsciiEffects(doc), [doc]);
+  const hasAudio = useMemo(() => audioSegments(doc).length > 0, [doc]);
+  const effectId = asciiEffects.some((r) => r.effect.id === ascii.effectId) ? ascii.effectId : (defaultAsciiEffect(doc)?.effect.id ?? '');
+  // A saved "ASCII text" choice falls back to PNG in a doc without an ASCII effect.
+  const fmt: DialogFormat = settings.format === ASCII_FORMAT && !asciiEffects.length ? 'png' : settings.format;
+  const isAscii = fmt === ASCII_FORMAT;
+  const k = kind(isAscii ? 'png-seq' : (fmt as ExportFormat));
   const scales = SCALES[k].filter((s) => k !== 'video' || Math.max(comp.width, comp.height) * s <= MAX_VIDEO_DIM);
   const scale = scales.includes(settings.scale) ? settings.scale : (scales.find((s) => s === 1) ?? scales[0]!);
   const w = Math.round(comp.width * scale);
@@ -66,10 +90,65 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     if (open) {
       setResult(null);
       setError(null);
+      setMessage(null);
     }
   }, [open]);
 
+  // Size estimate: one probe frame gives the grid size and colour mode; the rest is arithmetic.
+  const effect = asciiEffects.find((r) => r.effect.id === effectId)?.effect;
+  const effectKey = effect ? JSON.stringify([effect, comp.width, comp.height]) : '';
+  const sendsFile = ascii.output !== 'copy';
+  useEffect(() => {
+    setEstimate(null);
+    if (!open || !isAscii || !sendsFile || !effect) return;
+    let stale = false;
+    const timer = setTimeout(async () => {
+      try {
+        const { doc: d } = useEditor.getState();
+        const { sequence } = await captureAsciiSequence(d, effectId, { forceWebGL, times: [Math.min(time, comp.duration)] });
+        const fontBytes = ascii.output === 'html' || ascii.output === 'react' ? (await loadAsciiFontBytes(effect.text.fontId ?? '')).length : 0;
+        const bytes = estimateAsciiBytes({
+          cols: sequence.cols,
+          rows: sequence.rows,
+          frames: asciiFrameCount(d),
+          color: !sequence.mono,
+          output: ascii.output as Exclude<AsciiOutput, 'copy'>,
+          fontBytes,
+          audioSeconds: ascii.sound && hasAudio ? d.comp.duration : 0,
+        });
+        if (!stale) setEstimate(bytes);
+      } catch {
+        /* no estimate: the export itself reports the problem */
+      }
+    }, 300);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- effectKey stands for the effect and comp size
+  }, [open, isAscii, sendsFile, effectKey, ascii.output, ascii.sound, hasAudio, forceWebGL]);
+
   const update = (patch: Partial<typeof settings>) => setSettings((s) => ({ ...s, ...patch }));
+
+  const startAscii = async (ac: AbortController) => {
+    const { doc: d } = useEditor.getState();
+    const run = (): Promise<Awaited<ReturnType<typeof runAsciiExport>>> =>
+      runAsciiExport(d, { effectId, output: ascii.output, sound: ascii.sound && hasAudio, time }, { forceWebGL, signal: ac.signal, onProgress: setProgress });
+    if (ascii.output === 'copy') {
+      // Handing the clipboard a promise keeps the click's permission alive while the frame renders.
+      const job = run();
+      if (typeof ClipboardItem !== 'undefined') {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': job.then((r) => new Blob([r.text!], { type: 'text/plain' })) })]);
+      } else {
+        await navigator.clipboard.writeText((await job).text!);
+      }
+      setMessage(`Copied the ASCII at ${time.toFixed(2)}s to the clipboard.`);
+      return;
+    }
+    const r = await run();
+    downloadBlob(r.blob!, r.filename);
+    setMessage(`Saved ${r.filename} · ${r.frames} frames · ${fmtBytes(r.blob!.size)} · ${(r.ms / 1000).toFixed(1)}s${r.notes.length ? ` · ${r.notes.join(' ')}` : ''}`);
+  };
 
   const start = async () => {
     const ac = new AbortController();
@@ -77,10 +156,12 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     setProgress(0);
     setResult(null);
     setError(null);
+    setMessage(null);
     try {
       const { doc, setPlaying } = useEditor.getState();
       setPlaying(false); // the playing preview competes for the main thread and GPU (export runs ~realtime alone)
-      const r = await runExport(doc, { ...settings, scale, time }, { forceWebGL, signal: ac.signal, onProgress: setProgress });
+      if (isAscii) return await startAscii(ac);
+      const r = await runExport(doc, { ...settings, format: fmt as ExportFormat, scale, time }, { forceWebGL, signal: ac.signal, onProgress: setProgress });
       downloadBlob(r.blob, r.filename);
       setResult(r);
     } catch (e) {
@@ -105,7 +186,11 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
         <DialogHeader>
           <DialogTitle>Export</DialogTitle>
           <DialogDescription>
-            {k === 'still'
+            {isAscii
+              ? ascii.output === 'copy'
+                ? `The ASCII at ${time.toFixed(2)}s as plain text, cell for cell as drawn.`
+                : `${frameCount} frames (${comp.duration}s at ${comp.fps} fps) of text, cell for cell as drawn.`
+              : k === 'still'
               ? `The frame at ${time.toFixed(2)}s, exactly as previewed.`
               : k === 'sequence'
                 ? `${frameCount} frames (${comp.duration}s at ${comp.fps} fps), each exactly as previewed.`
@@ -113,7 +198,26 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
-          <PresetGrid label="Format" value={settings.format} options={FORMATS} onChange={(format) => update({ format })} columns={4} />
+          <PresetGrid<DialogFormat>
+            label="Format"
+            value={fmt}
+            options={asciiEffects.length ? [...FORMATS, { value: ASCII_FORMAT, label: 'ASCII text' }] : FORMATS}
+            onChange={(format) => update({ format })}
+            columns={4}
+          />
+          {isAscii && (
+            <>
+              <SelectField label="ASCII effect" value={effectId} options={asciiEffects.map((r) => ({ value: r.effect.id, label: r.label }))} onValueChange={(id) => setAscii((a) => ({ ...a, effectId: id }))} />
+              <PresetGrid label="Output" value={ascii.output} options={ASCII_OUTPUTS} onChange={(output) => setAscii((a) => ({ ...a, output }))} columns={3} />
+              {(ascii.output === 'html' || ascii.output === 'react') && hasAudio && (
+                <Switch switchSize="sm" checked={ascii.sound} onCheckedChange={(sound) => setAscii((a) => ({ ...a, sound }))} label="Include sound" labelClassName="text-sm text-zinc-300" />
+              )}
+              <p className="text-xs text-dim">
+                {ascii.output === 'copy' ? 'Copies the text of the current frame.' : `Text of the chosen effect only (other layers are not text). Estimated size: ${estimate === null ? 'calculating…' : `about ${fmtBytes(estimate)}`}.`}
+              </p>
+            </>
+          )}
+          {!isAscii && (
           <div className="space-y-1.5">
             <div className="flex items-baseline justify-between text-xs font-medium text-dim">
               <span>Size</span>
@@ -123,7 +227,8 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </div>
             <PresetGrid label="Scale" value={String(scale)} options={scales.map((s) => ({ value: String(s), label: `${s}×` }))} onChange={(v) => update({ scale: Number(v) })} columns={4} />
           </div>
-          {(settings.format === 'png' || settings.format === 'webp' || settings.format === 'png-seq') && (
+          )}
+          {(fmt === 'png' || fmt === 'webp' || fmt === 'png-seq') && (
             <Switch
               switchSize="sm"
               checked={settings.transparent}
@@ -132,7 +237,7 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               labelClassName="text-sm text-zinc-300"
             />
           )}
-          {settings.format === 'webm' && (
+          {fmt === 'webm' && (
             <>
               <Switch
                 switchSize="sm"
@@ -144,15 +249,15 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               <p className="text-xs text-dim">VP9 with an alpha channel, and Opus audio when a video layer has sound. Chrome and Firefox play the transparency; for tools that can't, turn it off.</p>
             </>
           )}
-          {settings.format === 'png-seq' && (
+          {fmt === 'png-seq' && (
             <p className="text-xs text-dim">
               {frameCount} PNGs, frame-00000.png onwards, in one .zip. No audio.
             </p>
           )}
-          {(settings.format === 'jpeg' || settings.format === 'webp') && (
+          {(fmt === 'jpeg' || fmt === 'webp') && (
             <SliderField label="Quality" hint={`${Math.round(settings.quality * 100)}%`} min={0.5} max={1} step={0.01} value={settings.quality} onValueChange={(quality) => update({ quality })} />
           )}
-          {settings.format === 'gif' && (
+          {fmt === 'gif' && (
             <>
               <SelectField
                 label="Frame rate"
@@ -164,6 +269,11 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </>
           )}
           {busy && <Progress value={Math.round((progress ?? 0) * 100)} max={100} label="Export progress" showValue size="sm" />}
+          {message && (
+            <p role="status" className="text-sm text-emerald-300">
+              {message}
+            </p>
+          )}
           {result && (
             <p role="status" className="text-sm text-emerald-300">
               Saved {result.filename} · {result.width}×{result.height} · {fmtBytes(result.blob.size)} · {(result.ms / 1000).toFixed(1)}s
@@ -183,7 +293,7 @@ export function ExportDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </Button>
           ) : (
             <Button variant="primary" onClick={start}>
-              <Download size={14} /> Export {FORMATS.find((f) => f.value === settings.format)!.label}
+              <Download size={14} /> {isAscii ? (ascii.output === 'copy' ? 'Copy ASCII frame' : 'Export ASCII text') : `Export ${FORMATS.find((f) => f.value === fmt)!.label}`}
             </Button>
           )}
         </DialogFooter>

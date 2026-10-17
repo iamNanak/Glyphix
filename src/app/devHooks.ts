@@ -10,6 +10,7 @@ import { fontLibrary } from '@/text/fontLibrary';
 import { createBackend } from '@/render/backend';
 import { exportVideo, renderFrameBitmap, runExport } from '@/export/exporter';
 import { mixAudio } from '@/export/audioMix';
+import * as asciiText from '@/export/asciiText';
 import * as mediabunny from 'mediabunny';
 import { importVideo, videoMeta } from '@/video/videoAssets';
 import { createExactFrames } from '@/video/exactFrames';
@@ -42,6 +43,8 @@ window.__glyphix = {
     runExport,
     exportVideo,
     mixAudio,
+    /** ASCII text export (e2e-ascii-text). */
+    asciiText,
     mediabunny,
     /** Register a video file as an asset (poster = `poster`), as video import will. */
     putVideoAsset: (id: string, poster: HTMLCanvasElement | ImageBitmap, file: Blob) => void assetStore.put(id, poster, { blob: file }),

@@ -17,7 +17,7 @@ export interface ExportOptions {
   onProgress?: (fraction: number) => void;
 }
 
-async function prepare(doc: Doc, opts: ExportOptions): Promise<{ backend: RenderBackend; canvas: HTMLCanvasElement; width: number; height: number }> {
+export async function prepare(doc: Doc, opts: ExportOptions): Promise<{ backend: RenderBackend; canvas: HTMLCanvasElement; width: number; height: number }> {
   const fonts = new Set(doc.comp.layers.flatMap((l) => (l.type === 'text' ? [l.fontId] : [])));
   // Frame bars draw their URL text with the CSS Inter face; make sure it's ready so export matches preview.
   // Missing fonts fall back to Inter (the same fallback the preview uses).
@@ -249,7 +249,7 @@ const withoutBackground = (doc: Doc): Doc => ({
   comp: { ...doc.comp, layers: doc.comp.layers.map((l) => (l.type === 'background' ? { ...l, visible: false } : l)) },
 });
 
-const safeName = (doc: Doc) => doc.name.trim().replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').slice(0, 80) || 'Untitled';
+export const safeName = (doc: Doc) => doc.name.trim().replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').slice(0, 80) || 'Untitled';
 
 export async function exportStill(doc: Doc, settings: Pick<ExportSettings, 'format' | 'scale' | 'quality' | 'transparent' | 'time'>, opts: ExportOptions = {}): Promise<ExportResult> {
   const started = performance.now();
