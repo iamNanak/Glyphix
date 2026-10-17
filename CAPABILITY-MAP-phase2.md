@@ -1,6 +1,6 @@
 # Capability Map: Glyphix — Phase 2 (Typography, GPU effects, ASCII)
 
-Status: **In progress — Milestone D done (`PLAN-milestone-d.md`), Milestone E done 2026-10-13 (`PLAN-milestone-e.md`), Milestone F done 2026-10-14 (`PLAN-milestone-f.md`); G (optional) next.** Built milestone by milestone, like Phase 1.
+Status: **In progress — Milestone D done (`PLAN-milestone-d.md`), Milestone E done 2026-10-13 (`PLAN-milestone-e.md`), Milestone F done 2026-10-14 (`PLAN-milestone-f.md`); next: ASCII Studio (priority), then G (optional).** Built milestone by milestone, like Phase 1.
 Source: `RESEARCH.md` §4 (GPU typography and effects), §8.2 (Phase 2), §11 (video → ASCII); the Phase 1 code.
 
 > 🧒 **In plain words:** Phase 1 made Glyphix a good screenshot editor that can move things. Phase 2 makes it
@@ -27,6 +27,9 @@ MP4 (with audio), WebM with transparency, GIF or PNG. The preview still looks ex
 | `video-layer` | Video import, preview via `<video>` + `requestVideoFrameCallback`, frame-exact export via Mediabunny decode, audio passthrough into MP4 | `assets`, `export`, `compositor` |
 | `ascii` | ASCII effect (two-pass: cell analysis → glyph raster), calibrated brightness LUT from the real font, charsets, colour modes, edge glyphs, keyframable params; works on any layer or adjustment layer | `effects`, `font-manager` |
 | `export-v2` | WebM VP9 with alpha, MP4 with audio, PNG sequence (zip); effects and video are frame-exact | `export`, `video-layer` |
+| `ascii-text` | Read back the exact characters the GPU chose (cell glyph + colour per frame); copy a frame as text, export a .txt/JSON frame sequence (zip), a self-contained HTML player and a React component | `ascii`, `export-v2` |
+| `ascii-glyphs` | Custom character order, any bundled/uploaded font for ASCII (glyph set built at runtime), non-square cells (line height, letter spacing), columns × rows / auto-fit, density threshold | `ascii`, `font-manager` |
+| `ascii-studio-ux` | One-click "Video → ASCII" (fit canvas, add effect), ASCII look presets, animated GIF input, optional frame counter | `ascii`, `video-layer` |
 | `redact` *(optional)* | Redact layer (blur / pixelate / solid box) + OCR auto-detect of text regions in a Worker | `effects`, `assets` |
 
 ## Build order
@@ -46,6 +49,12 @@ Milestone F — "Video and ASCII"
   video-layer → ascii → export-v2
   ✔ Gate: 1080p30 video plays in sync; ASCII 160×90 on 1080p at 60 fps preview (effect < 2 ms);
           MP4 with audio and WebM-alpha export frame-exact
+
+Milestone F+ — "ASCII Studio"  (PRIORITY: next, before G)
+  ascii-glyphs → ascii-text → ascii-studio-ux
+  ✔ Gate: text export equals the rendered ASCII cell for cell (every frame of a test video); custom
+          charset + any font render identically on WebGPU / WebGL2 and in export; 160×90 ASCII video still
+          60 fps; HTML player plays the exported sequence in sync; GIF input frame-exact; keyboard + axe clean
 
 Milestone G (optional) — "Redact"
   redact (manual first, then OCR auto-detect)
