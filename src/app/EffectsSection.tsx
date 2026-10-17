@@ -12,8 +12,10 @@ import {
   removeKey,
   sampleProp,
   setValueAt,
+  applyAsciiPreset,
   ASCII_BUILTIN_FONT,
   ASCII_CUSTOM_CHARSET,
+  ASCII_PRESETS,
   type Effect,
   type EffectKind,
   type EffectParamDef,
@@ -138,6 +140,20 @@ function AsciiTextFields({ effect, edit, base }: { effect: Effect; edit: Edit; b
   const missing = font ? charsetGlyphs(charset).filter((ch) => ch !== ' ' && font.outline(ch) === null) : [];
   return (
     <div className="space-y-2">
+      <Field label="Look">
+        <Select
+          aria-label="ASCII look preset"
+          selectSize="sm"
+          fullWidth
+          placeholder="Apply a look…"
+          value=""
+          options={ASCII_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+          onValueChange={(id) => {
+            const preset = ASCII_PRESETS.find((p) => p.id === id);
+            if (preset) edit(`ASCII look: ${preset.label}`, base, applyAsciiPreset(effect, preset));
+          }}
+        />
+      </Field>
       <Field label="Font">
         <div className="flex items-center gap-1.5">
           <div className="min-w-0 flex-1">
