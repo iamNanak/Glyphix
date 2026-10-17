@@ -67,6 +67,29 @@ own git worktree; the coordinator owns the shared interfaces and merges.
 - Reading back the cell texture every frame adds a GPU→CPU wait; text export may run slower than video export.
 - Safari and real GPUs remain unverified (as in F).
 
-## Status
+## Status (2026-10-18)
 
-Not started — planned 2026-10-18.
+F+1–F+5 done. Coordinator built F+1 and F+2 (fonts/charsets) and integrated; two Sonnet worker agents built
+F+3 (text export) and F+4 (GIF, presets, Video → ASCII, frame counter) in separate worktrees. Headless, Intel
+Iris Xe; Chrome WebGPU, Chrome forced WebGL2 (`?webgl`), Playwright Firefox.
+
+| Gate | Result |
+|---|---|
+| Text = rendered cells | text export = GPU readback (text + colour) on frames 0, 7, 31, 100, 217 of the demo (mono and colour, WebGPU and WebGL2); text vs drawn picture per-cell ink correlation ≥ 0.9915 (colour) / 1.0000 (mono). WebGPU vs WebGL2 text: 99.99 % of cells equal (1 of 14 400 differs at a brightness boundary) |
+| Any font + custom charset | built-in, Geist Mono, Fraunces × custom charset: WebGPU ≈ WebGL2 (mean Δ ≤ 0.002); first frame on a fresh backend already in the right font (Δ 0); old projects: atlases byte-identical, square cells kept |
+| Speed | bench "1080p + ASCII 320×90" (default font-shaped cells, 2× the gate's cells) and "1080p video + ASCII": 60 fps p50 on WebGPU and WebGL2; ASCII passes 1.0–1.4 ms (160×90, e2e-ascii); determinism Δ 0 |
+| HTML player | plays at 30.3 fps, drift 0.6 frames over 3 s (Chrome); with sound, frames follow the audio clock (±1 frame); React component type-checks and plays |
+| GIF input | frame-exact in provider, preview and exported still; trim/loop; reload and `.glyphix` round-trip (e2e-gif, all three browsers) |
+| Earlier gates | all 16 e2e suites green on Chrome WebGPU, WebGL2 and Firefox; axe clean incl. the ASCII card and ASCII export dialog |
+
+Sizes, 10 s 30 fps 160×90: HTML player 0.32 MB mono / 3.4 MB colour; JSON 4.4 / 30 MB; TXT zip 0.33 MB.
+Text capture ≈ 25 ms/frame (Chrome), ≈ 100 ms/frame (Firefox).
+
+Not verified / limits:
+- Text equality was checked on 5 sampled frames of the demo doc, not every frame of a test video.
+- Player drift measured over 3 s, not 10 s; headless Firefox drifted up to 2 frames in a worker run (passed in the final run).
+- The size estimate is 2–4× high for HTML/React on the demo (it compresses unusually well); untested on real footage.
+- Player sound tested with a synthetic tone, not a real video's mix. Safari and real GPUs not checked.
+- Animating the cell size during a text export fits every frame to the first frame's grid (the dialog says so).
+- Non-monospace fonts look uneven in the fixed grid (each glyph centred in its cell).
+- C8 (export in a Worker) still deferred.
