@@ -40,7 +40,9 @@ await page.evaluate(async () => {
     const doc = structuredClone(window.__glyphix.state().doc);
     const layer = d.createAdjustmentLayer('ascii');
     const e = layer.effects[0];
+    // Square cells: 160 × 90 on a 16:9 comp (font-shaped cells would be half as wide).
     e.params.size = { static: doc.comp.width / 160 };
+    e.params.square = { static: 1 };
     e.params.colorMode = { static: mono ? 0 : 1 };
     doc.comp.layers.push(layer);
     doc.comp.duration = duration;
