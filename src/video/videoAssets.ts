@@ -5,6 +5,8 @@
 import { ALL_FORMATS, BlobSource, Input, VideoSampleSink, type InputVideoTrack } from 'mediabunny';
 import { VIDEO_ASSET_PREFIX } from '@/doc/assets';
 import { assetStore, makeProxies, sha256Hex } from '@/assets/assetStore';
+import { decodeGif, GifError } from './gifDecoder';
+import { registerGif, sniffGif } from './gifAssets';
 
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 export const VIDEO_ACCEPT = '.mp4,.m4v,.webm,.mov,.mkv,video/mp4,video/webm,video/quicktime';
@@ -117,7 +119,25 @@ function register(id: string, blob: Blob): Promise<VideoMeta> {
   return p;
 }
 
+/** An animated GIF: decode every frame now (small files), the first one is the poster. */
+async function registerGifAsset(id: string, blob: Blob): Promise<VideoMeta> {
+  let gif;
+  try {
+    gif = decodeGif(new Uint8Array(await blob.arrayBuffer()));
+  } catch (e) {
+    throw new VideoFileError(e instanceof GifError ? e.message : 'This GIF is damaged or can’t be read.');
+  }
+  const first = gif.frames[0]!;
+  const poster = await createImageBitmap(new ImageData(first.rgba, gif.width, gif.height));
+  const meta: VideoMeta = { width: gif.width, height: gif.height, duration: gif.duration, fps: roundFps(gif.frames.length / gif.duration), hasAudio: false, codec: 'gif' };
+  registerGif(id, gif);
+  metas.set(id, meta);
+  assetStore.put(id, poster, { levels: await makeProxies(poster), blob: blob.type === 'image/gif' ? blob : new Blob([blob], { type: 'image/gif' }) });
+  return meta;
+}
+
 async function registerNow(id: string, blob: Blob): Promise<VideoMeta> {
+  if (await sniffGif(blob)) return registerGifAsset(id, blob);
   const { source, meta, mime } = await open(blob);
   let poster: ImageBitmap;
   try {

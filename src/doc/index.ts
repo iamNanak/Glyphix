@@ -12,3 +12,6 @@ export * from './migrations';
 export * from './assets';
 export * from './effects';
 export * from './video';
+export * from './asciiPresets';
+export * from './textTokens';
+export * from './videoToAscii';
