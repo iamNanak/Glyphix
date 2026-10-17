@@ -372,12 +372,13 @@ function colorAdjustMaterial() {
 function asciiCellsMaterial() {
   const src = texture(blankTexture);
   const lut = texture(blankTexture);
-  const size = uniform(12); // cell, comp px
+  const size = uniform(new THREE.Vector2(12, 12)); // cell, comp px
   const cellOrigin = uniform(new THREE.Vector2(0, 0)); // cell index of texel pair (0,0)
   const targetSize = uniform(new THREE.Vector2(2, 1)); // texels
   const edges = uniform(0);
   const threshold = uniform(0.25);
   const count = uniform(10); // charset glyphs (the edge glyphs follow)
+  const density = uniform(0); // cells with less ink than this stay blank
   const mode = uniform(0);
   const invert = uniform(0);
   const contrast = uniform(0);
@@ -422,6 +423,7 @@ function asciiCellsMaterial() {
     b = mix(b, float(1).sub(b), invert);
     // Calibrated LUT: brightness → the glyph whose measured ink coverage matches it.
     let idx: F = round(lut.load(ivec2(int(round(b.mul(LUT_SIZE - 1))), int(0))).r.mul(255));
+    idx = select(b.lessThan(density), float(0), idx);
     // Edge glyph by gradient direction (y down): | for horizontal gradients, - for vertical, / and \ between.
     gx = gx.div(10);
     gy = gy.div(10);
@@ -434,7 +436,7 @@ function asciiCellsMaterial() {
     const inkRGB = select(mode.equal(0), ink.xyz, select(mode.equal(1), hue, two));
     return select(second.greaterThan(0.5), vec4(idx, 0, 0, 1), vec4(inkRGB, alpha));
   });
-  return { mat, src, lut, size, cellOrigin, targetSize, edges, threshold, count, mode, invert, contrast, gamma, ink, ink2 };
+  return { mat, src, lut, size, cellOrigin, targetSize, edges, threshold, count, density, mode, invert, contrast, gamma, ink, ink2 };
 }
 
 /**
@@ -446,7 +448,7 @@ function asciiDrawMaterial() {
   const src = texture(blankTexture); // the input, for "mix"
   const cells = texture(blankTexture);
   const atlas = texture(blankTexture);
-  const size = uniform(12);
+  const size = uniform(new THREE.Vector2(12, 12));
   const cellOrigin = uniform(new THREE.Vector2(0, 0));
   const gridMax = uniform(new THREE.Vector2(0, 0)); // last valid cell (texel pair)
   const atlasCells = uniform(new THREE.Vector2(16, 1)); // glyph columns, rows

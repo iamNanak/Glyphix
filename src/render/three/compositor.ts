@@ -6,7 +6,9 @@
 import * as THREE from 'three/webgpu';
 import type { Color, ResolvedEffect } from '@/doc';
 import { createFxMaterials, fxFrame, type FxMaterials } from './fxMaterials';
-import { ASCII_CELL, ASCII_COLS, ASCII_MAX_LOD, asciiAtlas, CHARSETS, LUT_SIZE } from './asciiAtlas';
+import { ASCII_CUSTOM_CHARSET } from '@/doc';
+import { ASCII_CELL, ASCII_COLS, ASCII_MAX_LOD, asciiAtlas, CHARSETS, LUT_SIZE, type AsciiAtlas } from './asciiAtlas';
+import { asciiFont } from './asciiFonts';
 
 const DEG = Math.PI / 180;
 const tmpColor = new THREE.Color();
@@ -111,8 +113,9 @@ export class Compositor {
   private m: FxMaterials = createFxMaterials();
   private pool = new TargetPool();
   private f!: CompositeFrame;
-  /** ASCII charset atlas + LUT textures, per charset (CPU data is shared; textures are per renderer). */
-  private asciiTex = new Map<number, { atlas: THREE.DataTexture; lut: THREE.DataTexture; count: number; rows: number; chars: string[] }>();
+  /** ASCII atlas + LUT textures per atlas (CPU data is shared; textures are per renderer), with the frame last used. */
+  private asciiTex = new Map<AsciiAtlas, { atlas: THREE.DataTexture; lut: THREE.DataTexture; used: number }>();
+  private frameNo = 0;
   /** Effect id whose ASCII cell grid the next frame keeps for reading back (text export). */
   captureId: string | null = null;
   /** The kept cell grid; release with releaseCapture(). */
@@ -188,6 +191,14 @@ export class Compositor {
     if (this.pool.live !== held) console.warn('[glyphix] compositor leaked render targets', this.pool.live - held);
     this.pool.live = held;
     this.pool.endFrame();
+    // Drop atlases not drawn for a while (e.g. while dragging the line height or editing a custom charset).
+    this.frameNo++;
+    for (const [a, t] of this.asciiTex)
+      if (this.frameNo - t.used > 120) {
+        t.atlas.dispose();
+        t.lut.dispose();
+        this.asciiTex.delete(a);
+      }
   }
 
   releaseCapture() {
@@ -366,10 +377,12 @@ export class Compositor {
     }
   }
 
-  private asciiTextures(charset: number) {
-    let t = this.asciiTex.get(charset);
-    if (t) return t;
-    const a = asciiAtlas(charset);
+  private asciiTextures(a: AsciiAtlas) {
+    let t = this.asciiTex.get(a);
+    if (t) {
+      t.used = this.frameNo;
+      return t;
+    }
     // Our own box-filtered mips (not GPU-generated), so both backends sample identical levels.
     const atlas = new THREE.DataTexture(a.mips[0]!.data, a.width, a.height, THREE.RedFormat, THREE.UnsignedByteType);
     atlas.mipmaps = a.mips;
@@ -383,8 +396,8 @@ export class Compositor {
       tex.flipY = false;
       tex.needsUpdate = true;
     }
-    t = { atlas, lut, count: a.count, rows: a.height / ASCII_CELL, chars: a.chars };
-    this.asciiTex.set(charset, t);
+    t = { atlas, lut, used: this.frameNo };
+    this.asciiTex.set(a, t);
     return t;
   }
 
@@ -397,29 +410,39 @@ export class Compositor {
     const q = e.params;
     const f = this.f;
     const k = f.pxPerUnit;
-    const size = Math.max(1, q.size!);
-    const compRange = (bufMax: number, origin: number, compMax: number) => {
+    const preset = Math.min(CHARSETS.length, Math.max(0, Math.round(q.charset!)));
+    const charset = preset === ASCII_CUSTOM_CHARSET ? e.text.charset! : CHARSETS[preset]!;
+    const font = asciiFont(e.text.fontId!, q.weight!, charset);
+    // The font is still loading (preview only: export prepare()s first): show the input for now.
+    if (!font) return src;
+    const a = asciiAtlas(font, { charset, lineHeight: q.lineHeight!, spacing: q.spacing!, square: q.square! >= 0.5 });
+    // Cell size (comp px): `size` is the height, or `columns` sets the width; the font sets the shape.
+    const cols0 = Math.round(q.columns!);
+    const cw = cols0 > 0 ? f.compWidth / cols0 : Math.max(1, q.size!) * a.aspect;
+    const ch = cols0 > 0 ? cw / a.aspect : Math.max(1, q.size!);
+    const compRange = (bufMax: number, origin: number, compMax: number, size: number) => {
       const lo = Math.max(0, -origin / k);
       const hi = Math.min(compMax, (bufMax - origin) / k);
       const c0 = Math.floor(lo / size);
       return [c0, Math.max(c0, Math.ceil(hi / size) - 1)] as const;
     };
-    const [cx0, cx1] = compRange(f.width, f.originX, f.compWidth);
-    const [cy0, cy1] = compRange(f.height, f.originY, f.compHeight);
+    const [cx0, cx1] = compRange(f.width, f.originX, f.compWidth, cw);
+    const [cy0, cy1] = compRange(f.height, f.originY, f.compHeight, ch);
     const cols = cx1 - cx0 + 1;
     const rows = cy1 - cy0 + 1;
     const cells = this.target(false, Math.ceil(cols / 32) * 64, Math.ceil(rows / 32) * 32);
 
-    const tex = this.asciiTextures(Math.min(CHARSETS.length - 1, Math.max(0, Math.round(q.charset!))));
+    const tex = this.asciiTextures(a);
     const { cells: c, draw: d } = this.m.ascii;
     c.src.value = src.texture;
     c.lut.value = tex.lut;
-    c.size.value = size;
+    c.size.value.set(cw, ch);
     c.cellOrigin.value.set(cx0, cy0);
     c.targetSize.value.set(cells.width, cells.height);
     c.edges.value = q.edges! >= 0.5 ? 1 : 0;
     c.threshold.value = q.edgeThreshold!;
-    c.count.value = tex.count;
+    c.count.value = a.count;
+    c.density.value = q.threshold!;
     c.mode.value = Math.round(q.colorMode!);
     c.invert.value = q.invert! >= 0.5 ? 1 : 0;
     c.contrast.value = q.contrast!;
@@ -431,11 +454,11 @@ export class Compositor {
     d.src.value = src.texture;
     d.cells.value = cells.texture;
     d.atlas.value = tex.atlas;
-    d.size.value = size;
+    d.size.value.set(cw, ch);
     d.cellOrigin.value.set(cx0, cy0);
     d.gridMax.value.set(cols - 1, rows - 1);
-    d.atlasCells.value.set(ASCII_COLS, tex.rows);
-    const lod = Math.min(ASCII_MAX_LOD, Math.max(0, Math.log2(ASCII_CELL / (size * k))));
+    d.atlasCells.value.set(ASCII_COLS, a.height / ASCII_CELL);
+    const lod = Math.min(ASCII_MAX_LOD, Math.max(0, Math.log2(ASCII_CELL / (Math.min(cw, ch) * k))));
     d.lod.value = lod;
     d.inset.value = (0.5 * 2 ** Math.ceil(lod)) / ASCII_CELL;
     d.background.value = q.background!;
@@ -443,7 +466,7 @@ export class Compositor {
     setLinear(d.bg.value, e.colors.bg!);
     const out = this.out();
     this.pass(d.mat, out);
-    if (e.id === this.captureId && !this.captured) this.captured = { target: cells, cols, rows, cellWidth: size, cellHeight: size, chars: tex.chars };
+    if (e.id === this.captureId && !this.captured) this.captured = { target: cells, cols, rows, cellWidth: cw, cellHeight: ch, chars: a.chars };
     else this.pool.release(cells);
     return out;
   }

@@ -1,14 +1,15 @@
 // ASCII effect charsets: glyph atlas (coverage bitmaps with box-filtered mips) and the calibrated
-// brightness → glyph LUT. Pure data (no GPU), so it can be unit-tested and is built synchronously.
+// brightness → glyph LUT. Pure data (no GPU), so it can be unit-tested and is built synchronously once the
+// font's outlines are at hand.
 //
-// Glyphs are rasterised from embedded JetBrains Mono outlines with a small scanline rasteriser
-// (4×4 supersampling, nonzero winding) in plain JS arithmetic, so every browser and both GPU backends
-// get byte-identical atlases. Each glyph's ink coverage is measured from its bitmap; the LUT picks,
-// for each brightness, the glyph whose coverage is nearest to brightness × (densest coverage), so
-// on-screen ink density follows brightness linearly.
+// Glyphs are rasterised from outlines (the embedded JetBrains Mono ones, or any loaded font's via HarfBuzz)
+// with a small scanline rasteriser (4×4 supersampling, nonzero winding) in plain JS arithmetic, so every
+// browser and both GPU backends get byte-identical atlases. Each glyph's ink coverage is measured from its
+// bitmap; the LUT picks, for each brightness, the glyph whose coverage is nearest to brightness × (densest
+// coverage), so on-screen ink density follows brightness linearly.
 import { ASCII_FONT, ASCII_GLYPHS } from './asciiGlyphs';
 
-/** Charset glyphs by the effect's `charset` param value (labels: ASCII_CHARSETS in doc/effects.ts). */
+/** Preset charset glyphs by the effect's `charset` param value (labels: ASCII_CHARSETS in doc/effects.ts). */
 export const CHARSETS = [' .:-=+*#%@', ' ░▒▓█', " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$", ' 01'] as const;
 
 /** Edge glyphs, appended after every charset; index = edge bin − 1 (vertical, horizontal, rising, falling). */
@@ -19,7 +20,39 @@ export const ASCII_CELL = 64;
 export const ASCII_COLS = 16;
 export const ASCII_MAX_LOD = Math.log2(ASCII_CELL);
 export const LUT_SIZE = 256;
+/** Most glyphs a charset may hold (the LUT stores 8-bit indices; edge glyphs come on top). */
+export const MAX_CHARSET = 200;
 const SS = 4; // supersampling per axis
+
+/** Font metrics (font units) the cell box is built from. */
+export interface OutlineFont {
+  /** Cache key: font id + weight. */
+  key: string;
+  upem: number;
+  /** Cell advance (a monospace font's advance; for others the advance of "M"). */
+  advance: number;
+  ascender: number;
+  descender: number;
+  /** Outline of one character (HarfBuzz path, font units, y up); null when the font has no glyph for it. */
+  outline(ch: string): string | null;
+}
+
+/** The embedded JetBrains Mono 500 outlines (only the preset charsets and edge glyphs). */
+export const BUILTIN_FONT: OutlineFont = {
+  key: 'builtin',
+  ...ASCII_FONT,
+  outline: (ch) => ASCII_GLYPHS[ch] ?? null,
+};
+
+export interface AtlasSpec {
+  /** Glyphs to use (any order, duplicates ignored). */
+  charset: string;
+  /** Line height (× em) and letter spacing (× advance): the cell box around each glyph. */
+  lineHeight: number;
+  spacing: number;
+  /** Legacy square cells (schema ≤ 5): glyphs stretched to fill a square. */
+  square: boolean;
+}
 
 export interface AsciiAtlas {
   /** Glyphs in atlas order: the charset sorted by coverage, then EDGE_CHARS. */
@@ -28,6 +61,10 @@ export interface AsciiAtlas {
   coverage: number[];
   /** Number of charset glyphs (before the edge glyphs). */
   count: number;
+  /** Charset glyphs the font doesn't have (left out). */
+  missing: string[];
+  /** Cell width / height. */
+  aspect: number;
   width: number;
   height: number;
   /** R8 mip chain, level 0 first (box-filtered, so every level keeps each glyph's coverage). */
@@ -36,22 +73,42 @@ export interface AsciiAtlas {
   lut: Uint8Array;
 }
 
+interface Box {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+const isBlock = (ch: string) => /[░▒▓█]/.test(ch);
+
 /**
- * Font-unit box mapped onto the square cell: x spans the advance (600) plus a little room, y spans
- * descender-ish to ascender-ish. Text glyphs get a mild horizontal stretch (square cells, 0.6-em glyphs);
- * block elements fill the whole line box so they tile seamlessly.
+ * The font-unit box mapped onto an atlas cell. Square (legacy): x spans the advance plus a little room,
+ * y descender-ish to ascender-ish, so 0.6-em glyphs get a mild horizontal stretch. Otherwise the box is the
+ * real cell: advance × (1 + spacing) wide, line height × em tall, centred on the font's line box. Block
+ * elements always fill the whole cell so they tile seamlessly.
  */
-function cellBox(ch: string) {
-  const { advance, ascender, descender } = ASCII_FONT;
-  if (/[░▒▓█]/.test(ch)) return { x0: 0, x1: advance, y0: descender, y1: ascender };
-  return { x0: -80, x1: advance + 80, y0: -175, y1: 905 };
+function cellBox(font: OutlineFont, spec: AtlasSpec, ch: string): Box {
+  const { upem, advance: a, ascender, descender } = font;
+  if (isBlock(ch)) return { x0: 0, x1: a, y0: descender, y1: ascender };
+  if (spec.square) return { x0: (-80 / 600) * a, x1: a + (80 / 600) * a, y0: -0.175 * upem, y1: 0.905 * upem };
+  const pad = (spec.spacing * a) / 2;
+  const yc = (ascender + descender) / 2;
+  const h = (spec.lineHeight * upem) / 2;
+  return { x0: -pad, x1: a + pad, y0: yc - h, y1: yc + h };
+}
+
+/** Cell width / height for a spec (square cells: 1). */
+export function cellAspect(font: OutlineFont, spec: AtlasSpec): number {
+  if (spec.square) return 1;
+  const b = cellBox(font, spec, 'M');
+  return (b.x1 - b.x0) / (b.y1 - b.y0);
 }
 
 type Edge = [x0: number, y0: number, x1: number, y1: number];
 
 /** Outline (harfbuzz path string, font units y up) → line segments in supersampled cell px (y down). */
-function flatten(path: string, ch: string): Edge[] {
-  const b = cellBox(ch);
+function flatten(path: string, b: Box): Edge[] {
   const r = ASCII_CELL * SS;
   const sx = r / (b.x1 - b.x0);
   const sy = r / (b.y1 - b.y0);
@@ -109,11 +166,11 @@ function flatten(path: string, ch: string): Edge[] {
 }
 
 /** One glyph → ASCII_CELL² coverage (0..255). Scanlines at sample centres, nonzero winding. */
-export function rasterizeGlyph(ch: string): Uint8Array {
+export function rasterizeGlyph(ch: string, font: OutlineFont = BUILTIN_FONT, spec: AtlasSpec = LEGACY_SPEC): Uint8Array {
   const out = new Uint8Array(ASCII_CELL * ASCII_CELL);
-  const path = ASCII_GLYPHS[ch];
+  const path = font.outline(ch);
   if (!path) return out;
-  const edges = flatten(path, ch);
+  const edges = flatten(path, cellBox(font, spec, ch));
   const r = ASCII_CELL * SS;
   const counts = new Uint16Array(ASCII_CELL * ASCII_CELL);
   const xs: { x: number; w: number }[] = [];
@@ -157,32 +214,47 @@ function downsample(src: Uint8Array, w: number, h: number) {
   return { data, width: W, height: H };
 }
 
+const LEGACY_SPEC: AtlasSpec = { charset: '', lineHeight: 1.2, spacing: 0, square: true };
+
 const glyphCache = new Map<string, { bitmap: Uint8Array; coverage: number }>();
 
-function glyph(ch: string) {
-  let g = glyphCache.get(ch);
+function glyph(font: OutlineFont, spec: AtlasSpec, ch: string) {
+  const k = `${font.key}|${specKey(spec)}|${ch}`;
+  let g = glyphCache.get(k);
   if (!g) {
-    const bitmap = rasterizeGlyph(ch);
+    const bitmap = rasterizeGlyph(ch, font, spec);
     let sum = 0;
     for (const v of bitmap) sum += v;
     g = { bitmap, coverage: sum / (255 * bitmap.length) };
-    glyphCache.set(ch, g);
+    glyphCache.set(k, g);
   }
   return g;
 }
 
-const atlasCache = new Map<number, AsciiAtlas>();
+/** Cell-shape part of a spec's cache key. */
+const specKey = (spec: AtlasSpec) => (spec.square ? 'sq' : `${spec.lineHeight.toFixed(3)},${spec.spacing.toFixed(3)}`);
 
-/** The atlas for one charset (built on first use, then cached). */
-export function asciiAtlas(charset: number): AsciiAtlas {
-  const id = Math.min(CHARSETS.length - 1, Math.max(0, Math.round(charset)));
-  const cached = atlasCache.get(id);
+/** The unique glyphs of a charset, at most MAX_CHARSET (blank charsets fall back to a space). */
+export function charsetGlyphs(charset: string): string[] {
+  const set = [...new Set([...charset.replace(/[\r\n\t]/g, '')])].slice(0, MAX_CHARSET);
+  return set.length ? set : [' '];
+}
+
+const atlasCache = new Map<string, AsciiAtlas>();
+
+/** The atlas for one font + spec (built on first use, then cached). */
+export function asciiAtlas(font: OutlineFont, spec: AtlasSpec): AsciiAtlas {
+  const key = `${font.key}|${specKey(spec)}|${spec.charset}`;
+  const cached = atlasCache.get(key);
   if (cached) return cached;
 
-  const set = [...new Set(CHARSETS[id]!)].map((ch) => ({ ch, ...glyph(ch) }));
+  const wanted = charsetGlyphs(spec.charset);
+  const missing = wanted.filter((ch) => ch !== ' ' && font.outline(ch) === null);
+  const usable = wanted.filter((ch) => !missing.includes(ch));
+  const set = (usable.length ? usable : [' ']).map((ch) => ({ ch, ...glyph(font, spec, ch) }));
   // Stable sort: equal coverage keeps the charset's order.
   set.sort((a, b) => a.coverage - b.coverage);
-  const all = [...set, ...[...EDGE_CHARS].map((ch) => ({ ch, ...glyph(ch) }))];
+  const all = [...set, ...[...EDGE_CHARS].map((ch) => ({ ch, ...glyph(font, spec, ch) }))];
 
   const width = ASCII_COLS * ASCII_CELL;
   const height = Math.ceil(all.length / ASCII_COLS) * ASCII_CELL;
@@ -212,11 +284,13 @@ export function asciiAtlas(charset: number): AsciiAtlas {
     chars: all.map((g) => g.ch),
     coverage: all.map((g) => g.coverage),
     count: set.length,
+    missing,
+    aspect: cellAspect(font, spec),
     width,
     height,
     mips,
     lut,
   };
-  atlasCache.set(id, atlas);
+  atlasCache.set(key, atlas);
   return atlas;
 }

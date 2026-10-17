@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ASCII_CELL, asciiAtlas, CHARSETS, EDGE_CHARS, LUT_SIZE, rasterizeGlyph } from './asciiAtlas';
+import { ASCII_CELL, asciiAtlas as build, BUILTIN_FONT, CHARSETS, EDGE_CHARS, LUT_SIZE, MAX_CHARSET, rasterizeGlyph, type AtlasSpec } from './asciiAtlas';
+
+const asciiAtlas = (id: number, spec: Partial<AtlasSpec> = {}) => build(BUILTIN_FONT, { charset: CHARSETS[id]!, lineHeight: 1.2, spacing: 0, square: true, ...spec });
 
 describe('ASCII atlas', () => {
   it('measures plausible coverage: space is empty, blocks are 25/50/75/100 %', () => {
@@ -37,5 +39,24 @@ describe('ASCII atlas', () => {
 
   it('rasterises deterministically', () => {
     expect(rasterizeGlyph('@')).toEqual(rasterizeGlyph('@'));
+  });
+
+  it('custom charsets: duplicates and missing glyphs dropped, capped, blank falls back to a space', () => {
+    const a = build(BUILTIN_FONT, { charset: '@@ .Ж\n', lineHeight: 1.2, spacing: 0, square: false });
+    expect(a.chars.slice(0, a.count).sort()).toEqual([' ', '.', '@']);
+    expect(a.missing).toEqual(['Ж']); // not among the embedded outlines
+    expect(build(BUILTIN_FONT, { charset: '', lineHeight: 1.2, spacing: 0, square: false }).chars[0]).toBe(' ');
+    const many = Array.from({ length: 300 }, (_, i) => String.fromCodePoint(0x4e00 + i)).join('');
+    const font = { ...BUILTIN_FONT, key: 'all', outline: () => 'M0,0L600,0L600,700Z' };
+    expect(build(font, { charset: many, lineHeight: 1.2, spacing: 0, square: false }).count).toBe(MAX_CHARSET);
+  });
+
+  it('cell shape: square = 1, otherwise advance × (1 + spacing) / line height', () => {
+    expect(asciiAtlas(0).aspect).toBe(1);
+    expect(asciiAtlas(0, { square: false }).aspect).toBeCloseTo(600 / 1200, 6);
+    expect(asciiAtlas(0, { square: false, lineHeight: 1, spacing: 0.5 }).aspect).toBeCloseTo(900 / 1000, 6);
+    // A taller line box shrinks the glyph vertically, so it inks less of the cell.
+    const at = (lh: number) => build(BUILTIN_FONT, { charset: '@', lineHeight: lh, spacing: 0, square: false }).coverage[0]!;
+    expect(at(2)).toBeLessThan(at(1));
   });
 });

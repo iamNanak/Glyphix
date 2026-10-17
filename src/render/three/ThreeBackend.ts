@@ -10,6 +10,7 @@ import {
   type FrameKind,
   type ImageItem,
   type RenderItem,
+  ASCII_CUSTOM_CHARSET,
   type RenderList,
   type TextItem,
 } from '@/doc';
@@ -18,6 +19,8 @@ import { ATLAS_SPREAD_EM, fontLibrary, type LaidOutGlyph, type TextLayout } from
 import { drawFrameBar } from '@/styling/frameBar';
 import { getSharedDevice } from './gpuDevice';
 import { Compositor, type CompositeStep } from './compositor';
+import { CHARSETS } from './asciiAtlas';
+import { asciiFontsNeeded } from './asciiFonts';
 import { createExactFrames } from '@/video/exactFrames';
 import type { FrameImage, VideoFrameProvider } from '@/video/provider';
 import type { AsciiCells, BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
@@ -680,7 +683,18 @@ export class ThreeBackend implements RenderBackend {
   }
 
   prepare(list: RenderList): Promise<void> {
-    return list.items.some((i) => i.kind === 'image' && i.video) ? this.frames.prepare(list) : Promise.resolve();
+    const waits: Promise<unknown>[] = [];
+    if (list.items.some((i) => i.kind === 'image' && i.video)) waits.push(this.frames.prepare(list));
+    // ASCII effects draw with fonts from the library: load them first (a broken font falls back to built-in).
+    const fonts = new Set<string>();
+    for (const item of list.items)
+      for (const e of item.effects)
+        if (e.kind === 'ascii') {
+          const preset = Math.round(e.params.charset!);
+          asciiFontsNeeded(e.text.fontId!, preset === ASCII_CUSTOM_CHARSET ? e.text.charset! : (CHARSETS[preset] ?? '')).forEach((id) => fonts.add(id));
+        }
+    for (const id of fonts) if (!fontLibrary.isLoaded(id)) waits.push(fontLibrary.load(id).catch(() => undefined));
+    return waits.length ? Promise.all(waits).then(() => undefined) : Promise.resolve();
   }
 
   async captureAscii(list: RenderList, effectId: string): Promise<AsciiCells | null> {

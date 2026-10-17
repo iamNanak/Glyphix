@@ -275,6 +275,26 @@ export class FontLibrary {
     return { glyphs: out, width: blockW, height: blockH, fontId, generation: this.generation };
   }
 
+  /**
+   * Outline of one character of a loaded font (the ASCII effect rasterises these itself): a HarfBuzz path
+   * in font units, y up ('' for blank glyphs). null when the font isn't loaded; `found` false when the
+   * font has no glyph for it.
+   */
+  outline(fontId: string, weight: number, ch: string): { path: string; advance: number; upem: number; ascender: number; descender: number; found: boolean } | null {
+    const file = this.files.get(fontId);
+    if (!file) return null;
+    const f = this.instance(file, effectiveWeight(file.info, weight));
+    const gid = f.font.glyph(ch.codePointAt(0)!) ?? 0;
+    return {
+      path: gid ? f.font.glyphToPath(gid) : '',
+      advance: f.font.glyphHAdvance(gid),
+      upem: file.upem,
+      ascender: f.ascender,
+      descender: f.descender,
+      found: gid !== 0,
+    };
+  }
+
   /** Atlas rect of one glyph of a loaded font (scramble charsets use this). */
   glyphFor(fontId: string, weight: number, codepoint: number): { glyph: AtlasGlyph | null; advance: number } | null {
     const file = this.files.get(fontId);

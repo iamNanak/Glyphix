@@ -142,6 +142,8 @@ const variants = await page.evaluate(async () => {
   for (let cs = 0; cs < fx.ASCII_CHARSETS.length; cs++)
     for (let mode = 0; mode < fx.ASCII_COLOR_MODES.length; mode++) {
       const doc = await window.__ascii.doc('adjust', { charset: cs, colorMode: mode });
+      // "Custom" defaults to the standard characters: give it its own.
+      if (cs === fx.ASCII_CUSTOM_CHARSET) doc.comp.layers.at(-1).effects[0].text.charset = ' ox#';
       const { data, png } = await window.__ascii.full(doc, 2.5);
       let sum = 0;
       let sum2 = 0;
@@ -198,9 +200,12 @@ await page.evaluate(() => {
 });
 const grid = await page.evaluate(async () => {
   const out = [];
-  for (const size of [12, 16, 20]) {
-    const doc = await window.__ascii.doc('adjust', { size, colorMode: 0, gamma: 1 }, { ink: [1, 1, 1, 1], bg: [0, 0, 0, 1] }, window.__ascii.flat(0.55));
-    const { data, png } = await window.__ascii.full(doc, 0, size === 20);
+  // Square cells (schema ≤ 5 projects): `size` wide. Font-shaped cells: JetBrains Mono at line height 1.2 is
+  // 0.6 / 1.2 = half as wide as tall.
+  for (const [size, square] of [[12, 1], [16, 1], [20, 1], [12, 0], [16, 0], [20, 0]]) {
+    const doc = await window.__ascii.doc('adjust', { size, square, colorMode: 0, gamma: 1 }, { ink: [1, 1, 1, 1], bg: [0, 0, 0, 1] }, window.__ascii.flat(0.55));
+    const { data, png } = await window.__ascii.full(doc, 0, size === 20 && square === 1);
+    const cell = square ? size : size / 2;
     const cols = window.__ascii.columns(data, 1920, 1080);
     const mean = cols.reduce((a, b) => a + b, 0) / cols.length;
     // Relative mean difference between column profiles p px apart: ~0 at the cell size only.
@@ -210,18 +215,18 @@ const grid = await page.evaluate(async () => {
       return s / (1920 - p) / mean;
     };
     // Within a cell, the emptiest column is at the cell border (the glyph sits inside its cell).
-    const folded = new Float64Array(size);
-    cols.forEach((v, x) => (folded[x % size] += v));
+    const folded = new Float64Array(cell);
+    cols.forEach((v, x) => (folded[x % cell] += v));
     const emptiest = folded.indexOf(Math.min(...folded));
-    out.push({ size, at: err(size), off: Math.min(err(size - 1), err(size + 1), err(Math.round(size / 2))), emptiest, png });
+    out.push({ size: cell, square, at: err(cell), off: Math.min(err(cell - 1), err(cell + 1), err(Math.round(cell / 2))), emptiest, png });
   }
   return out;
 });
 for (const g of grid) if (g.png) savePng('ascii-grid', g.png);
 check(
-  'cell grid: glyphs repeat every cell size px (12, 16, 20), aligned to the comp origin',
+  'cell grid: glyphs repeat every cell width (square 12/16/20 px; font-shaped 6/8/10 px), aligned to the comp origin',
   grid.every((g) => g.at < 0.01 && g.off > 0.1 && (g.emptiest === 0 || g.emptiest === g.size - 1)),
-  grid.map((g) => `${g.size}px: err ${g.at.toFixed(4)} vs ${g.off.toFixed(2)} off-period, emptiest column ${g.emptiest}`).join('; '),
+  grid.map((g) => `${g.square ? 'square ' : ''}${g.size}px: err ${g.at.toFixed(4)} vs ${g.off.toFixed(2)} off-period, emptiest column ${g.emptiest}`).join('; '),
 );
 
 const calib = await page.evaluate(async () => {

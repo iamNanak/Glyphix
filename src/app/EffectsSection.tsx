@@ -12,14 +12,19 @@ import {
   removeKey,
   sampleProp,
   setValueAt,
+  ASCII_BUILTIN_FONT,
+  ASCII_CUSTOM_CHARSET,
   type Effect,
   type EffectKind,
   type EffectParamDef,
   type Layer,
   type Prop,
 } from '@/doc';
+import { charsetGlyphs, CHARSETS } from '@/render/three/asciiAtlas';
+import { asciiFont } from '@/render/three/asciiFonts';
+import { FontPicker } from './FontPicker';
 import { useEditor } from './store';
-import { Button, ColorField, Field, IconButton, Section } from './ui';
+import { Button, ColorField, Field, IconButton, inputClass, Section } from './ui';
 import { Slider } from '@/components/wensity/slider';
 import { Select } from '@/components/wensity/select';
 
@@ -120,6 +125,48 @@ function ParamRow({
   );
 }
 
+/** ASCII font and custom characters (text settings, not keyframable). */
+function AsciiTextFields({ effect, edit, base }: { effect: Effect; edit: Edit; base: (string | number)[] }) {
+  const [fontError, setFontError] = useState<string | null>(null);
+  useEditor((s) => s.time); // the charset choice can be keyframed
+  const fontId = effect.text.fontId ?? ASCII_BUILTIN_FONT;
+  const preset = Math.round(sampleProp(effect.params.charset ?? { static: 0 }, useEditor.getState().time));
+  const custom = preset === ASCII_CUSTOM_CHARSET;
+  const charset = custom ? (effect.text.charset ?? '') : (CHARSETS[preset] ?? '');
+  const weight = sampleProp(effect.params.weight ?? { static: 500 }, 0);
+  const font = asciiFont(fontId, weight, charset);
+  const missing = font ? charsetGlyphs(charset).filter((ch) => ch !== ' ' && font.outline(ch) === null) : [];
+  return (
+    <div className="space-y-2">
+      <Field label="Font">
+        <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <FontPicker value={fontId || 'jetbrains-mono'} onChange={(id) => (setFontError(null), edit('ASCII: font', [...base, 'text', 'fontId'], id))} onError={setFontError} />
+          </div>
+          {fontId !== ASCII_BUILTIN_FONT && (
+            <Button className="h-8 shrink-0 px-2 text-xs" onClick={() => edit('ASCII: built-in font', [...base, 'text', 'fontId'], ASCII_BUILTIN_FONT)}>
+              Built-in
+            </Button>
+          )}
+        </div>
+      </Field>
+      {fontError && <p className="text-xs text-red-300">{fontError}</p>}
+      {custom && (
+        <Field label="Custom characters" hint="Any order: sorted by how much ink each one has">
+          <input
+            className={`${inputClass} py-1 font-mono`}
+            aria-label="ASCII custom characters"
+            value={effect.text.charset ?? ''}
+            spellCheck={false}
+            onChange={(e) => edit('ASCII: characters', [...base, 'text', 'charset'], e.target.value)}
+          />
+        </Field>
+      )}
+      {missing.length > 0 && <p className="text-xs text-amber-300">Not in this font (left out): {missing.join(' ')}</p>}
+    </div>
+  );
+}
+
 function EffectCard({ effects, index, edit }: { effects: Effect[]; index: number; edit: Edit }) {
   const effect = effects[index]!;
   const count = effects.length;
@@ -150,6 +197,7 @@ function EffectCard({ effects, index, edit }: { effects: Effect[]; index: number
       </div>
       {effect.enabled && (
         <>
+          {effect.kind === 'ascii' && <AsciiTextFields effect={effect} edit={edit} base={base} />}
           {def.params.map((p) => (
             <ParamControl
               key={p.key}
