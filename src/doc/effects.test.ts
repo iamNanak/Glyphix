@@ -65,6 +65,26 @@ describe('effects', () => {
     expect(doc.schemaVersion).toBe(SCHEMA_VERSION);
     doc.comp.layers.forEach((l) => expect(l.effects).toEqual([]));
   });
+
+  it('migrates v5 effects: text settings added, old ASCII effects keep square cells', () => {
+    const v5 = JSON.parse(JSON.stringify(createDemoDoc())) as { schemaVersion: number; comp: { layers: Record<string, unknown>[] } };
+    v5.schemaVersion = 5;
+    const ascii = createEffect('ascii') as unknown as Record<string, unknown>;
+    delete ascii.text;
+    delete (ascii.params as Record<string, unknown>).square;
+    const blur = createEffect('blur') as unknown as Record<string, unknown>;
+    delete blur.text;
+    v5.comp.layers[1]!.effects = [ascii, blur];
+    const doc = migrate(v5);
+    const [a, b] = doc.comp.layers[1]!.effects;
+    expect(a!.params.square).toEqual({ static: 1 });
+    expect(a!.text).toEqual({});
+    expect(b!.text).toEqual({});
+    // Missing text falls back to the defaults; new effects get natural (non-square) cells.
+    const [r] = resolveEffects([a!], 0, () => 1);
+    expect(r!.text).toEqual({ charset: ' .:-=+*#%@', fontId: '' });
+    expect(createEffect('ascii').params.square).toEqual({ static: 0 });
+  });
 });
 
 describe('keyframes at the playhead', () => {

@@ -18,6 +18,16 @@ export interface View {
   zoom: number;
 }
 
+/** The characters (and colours) an ASCII effect drew, row by row from the top-left cell. */
+export interface AsciiCells {
+  cols: number;
+  rows: number;
+  /** One string per row, `cols` characters each (empty cells are the charset's lightest glyph). */
+  lines: string[];
+  /** Per cell: glyph colour (sRGB 0..255) and cell alpha (0..255), row-major. */
+  rgba: Uint8Array;
+}
+
 export interface RenderBackend {
   readonly kind: BackendKind;
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -28,6 +38,11 @@ export interface RenderBackend {
   /** Await before render(list) so video layers show their exact frame (no-op without video). */
   prepare(list: RenderList): Promise<void>;
   render(list: RenderList): void;
+  /**
+   * Render the list, then read back the cell grid one ASCII effect drew (text export). Await prepare(list)
+   * first. null when that effect drew nothing this frame (disabled, no-op, or layer not visible).
+   */
+  captureAscii(list: RenderList, effectId: string): Promise<AsciiCells | null>;
   stats(): RenderStats;
   /** Called when the GPU device/context is lost and the backend is unusable. */
   onLost: ((reason: string) => void) | null;

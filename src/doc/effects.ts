@@ -18,6 +18,14 @@ export interface EffectParamDef {
   percent?: boolean;
   /** A choice (rendered as a select): the value is one of these. Still a number, so it can be keyed (it steps). */
   options?: { value: number; label: string }[];
+  /** Not keyframable (changing it rebuilds GPU data, e.g. the ASCII glyph atlas). */
+  fixed?: boolean;
+}
+
+export interface EffectTextDef {
+  key: string;
+  label: string;
+  default: string;
 }
 
 export interface EffectColorDef {
@@ -33,6 +41,7 @@ export interface EffectDef {
   description: string;
   params: EffectParamDef[];
   colors: EffectColorDef[];
+  texts?: EffectTextDef[];
 }
 
 const choice = (key: string, label: string, labels: readonly string[], def = 0): EffectParamDef => ({
@@ -46,7 +55,11 @@ const choice = (key: string, label: string, labels: readonly string[], def = 0):
 });
 
 /** ASCII charsets and colour modes, by param value (the renderer's CHARSETS follow this order). */
-export const ASCII_CHARSETS = ['Standard', 'Blocks', 'Detailed', 'Binary'] as const;
+export const ASCII_CHARSETS = ['Standard', 'Blocks', 'Detailed', 'Binary', 'Custom'] as const;
+/** Index of the "Custom" charset (uses the effect's `charset` text). */
+export const ASCII_CUSTOM_CHARSET = ASCII_CHARSETS.length - 1;
+/** `fontId` text value for the built-in ASCII font (JetBrains Mono outlines embedded in the renderer). */
+export const ASCII_BUILTIN_FONT = '';
 export const ASCII_COLOR_MODES = ['Mono', 'Original colour', 'Two-colour'] as const;
 
 const p = (key: string, label: string, min: number, max: number, def: number, step = 1, extra: Partial<EffectParamDef> = {}): EffectParamDef => ({
@@ -165,7 +178,14 @@ export const EFFECTS: readonly EffectDef[] = [
     description: 'Redraw as text characters',
     params: [
       p('size', 'Cell size', 4, 100, 12, 1, { unit: 'px' }),
+      // Cells across the comp; 0 = use the cell size.
+      p('columns', 'Columns', 0, 480, 0, 1),
       choice('charset', 'Characters', ASCII_CHARSETS),
+      p('weight', 'Font weight', 100, 900, 500, 100, { fixed: true }),
+      p('lineHeight', 'Line height', 0.5, 2, 1.2, 0.05, { fixed: true }),
+      p('spacing', 'Letter spacing', -0.5, 1, 0, 0.01, { fixed: true, percent: true }),
+      // Legacy (schema ≤ 5) square cells with glyphs stretched to fill them.
+      p('square', 'Square cells', 0, 1, 0, 1, { toggle: true, fixed: true }),
       choice('colorMode', 'Colour mode', ASCII_COLOR_MODES, 1),
       p('background', 'Background', 0, 1, 1, 0.01, { percent: true }),
       p('contrast', 'Contrast', -1, 1, 0, 0.01, { percent: true }),
@@ -173,7 +193,13 @@ export const EFFECTS: readonly EffectDef[] = [
       p('edges', 'Edges', 0, 1, 0, 1, { toggle: true }),
       p('edgeThreshold', 'Edge threshold', 0, 1, 0.25, 0.01, { percent: true }),
       p('invert', 'Invert', 0, 1, 0, 1, { toggle: true }),
+      // Cells darker than this stay blank (the charset's lightest glyph).
+      p('threshold', 'Density threshold', 0, 1, 0, 0.01, { percent: true }),
       p('mix', 'Mix', 0, 1, 1, 0.01, { percent: true }),
+    ],
+    texts: [
+      { key: 'charset', label: 'Custom characters (dark → light)', default: ' .:-=+*#%@' },
+      { key: 'fontId', label: 'Font', default: ASCII_BUILTIN_FONT },
     ],
     colors: [
       { key: 'ink', label: 'Glyph colour', default: [0.82, 1, 0.86, 1] },
@@ -222,14 +248,18 @@ export function createEffect(kind: EffectKind): Effect {
     enabled: true,
     params: Object.fromEntries(d.params.map((q) => [q.key, { static: q.default } as Prop<number>])),
     colors: Object.fromEntries(d.colors.map((c) => [c.key, [...c.default] as Color])),
+    text: Object.fromEntries((d.texts ?? []).map((x) => [x.key, x.default])),
   };
 }
 
 /** An effect with every parameter sampled at one time. Missing params fall back to defaults. */
 export interface ResolvedEffect {
+  /** The effect's id (lets the renderer capture one effect's output, e.g. ASCII cells for text export). */
+  id: string;
   kind: EffectKind;
   params: Record<string, number>;
   colors: Record<string, Color>;
+  text: Record<string, string>;
 }
 
 export function resolveEffects(effects: readonly Effect[], t: number, sample: (p: Prop<number>, t: number) => number): ResolvedEffect[] {
@@ -245,7 +275,9 @@ export function resolveEffects(effects: readonly Effect[], t: number, sample: (p
     }
     const colors: Record<string, Color> = {};
     for (const c of d.colors) colors[c.key] = e.colors[c.key] ?? c.default;
-    out.push({ kind: e.kind, params, colors });
+    const text: Record<string, string> = {};
+    for (const x of d.texts ?? []) text[x.key] = e.text?.[x.key] ?? x.default;
+    out.push({ id: e.id, kind: e.kind, params, colors, text });
   }
   return out;
 }

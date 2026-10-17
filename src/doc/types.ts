@@ -4,7 +4,7 @@
 import type { Motion } from './motion';
 
 /** Bump when the saved document shape changes, and add a migration in migrations.ts. */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export type Easing =
   | { kind: 'linear' }
@@ -57,6 +57,8 @@ export interface Effect {
   enabled: boolean;
   params: Record<string, Prop<number>>;
   colors: Record<string, Color>;
+  /** Text settings (ASCII: custom charset, font id). */
+  text: Record<string, string>;
 }
 
 export interface LayerBase {

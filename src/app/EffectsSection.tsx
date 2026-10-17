@@ -69,7 +69,7 @@ function ParamRow({
     const t = now();
     onChange(key ? removeKey(prop, t, eps) : addKey(prop, t, sampleProp(prop, t), eps), key ? 'Remove keyframe' : 'Add keyframe');
   };
-  const keyButton = (
+  const keyButton = def.fixed ? null : (
     <button
       type="button"
       onClick={toggleKey}

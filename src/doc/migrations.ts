@@ -69,6 +69,16 @@ const MIGRATIONS: Record<number, (doc: Json) => Json> = {
     const comp = doc.comp as Json & { layers: Json[] };
     return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => (l.type === 'image' ? { video: null, ...l } : l)) } };
   },
+  // v5 → v6: effects gain text settings; existing ASCII effects keep their square cells.
+  5: (doc) => {
+    const comp = doc.comp as Json & { layers: Json[] };
+    const effect = (e: Json): Json => {
+      const out: Json = { text: {}, ...e };
+      if (e.kind === 'ascii') out.params = { square: { static: 1 }, ...(e.params as Json) };
+      return out;
+    };
+    return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => ({ ...l, effects: ((l.effects as Json[] | undefined) ?? []).map(effect) })) } };
+  },
 };
 
 export class NewerSchemaError extends Error {

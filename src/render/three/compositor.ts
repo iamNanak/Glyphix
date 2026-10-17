@@ -94,13 +94,26 @@ export type CompositeStep =
   | { kind: 'layer'; node: number; effects: ResolvedEffect[] }
   | { kind: 'adjust'; effects: ResolvedEffect[]; opacity: number };
 
+/** One ASCII effect's cell grid as drawn: two texels per cell (ink colour + alpha, glyph index). */
+export interface AsciiCapture {
+  target: THREE.RenderTarget;
+  cols: number;
+  rows: number;
+  /** Glyphs by atlas index. */
+  chars: string[];
+}
+
 export class Compositor {
   private quad = new THREE.QuadMesh(new THREE.NodeMaterial());
   private m: FxMaterials = createFxMaterials();
   private pool = new TargetPool();
   private f!: CompositeFrame;
   /** ASCII charset atlas + LUT textures, per charset (CPU data is shared; textures are per renderer). */
-  private asciiTex = new Map<number, { atlas: THREE.DataTexture; lut: THREE.DataTexture; count: number; rows: number }>();
+  private asciiTex = new Map<number, { atlas: THREE.DataTexture; lut: THREE.DataTexture; count: number; rows: number; chars: string[] }>();
+  /** Effect id whose ASCII cell grid the next frame keeps for reading back (text export). */
+  captureId: string | null = null;
+  /** The kept cell grid; release with releaseCapture(). */
+  captured: AsciiCapture | null = null;
 
   constructor(private readonly renderer: THREE.WebGPURenderer) {}
 
@@ -168,9 +181,15 @@ export class Compositor {
   }
 
   endFrame() {
-    if (this.pool.live !== 0) console.warn('[glyphix] compositor leaked render targets', this.pool.live);
-    this.pool.live = 0;
+    const held = this.captured ? 1 : 0;
+    if (this.pool.live !== held) console.warn('[glyphix] compositor leaked render targets', this.pool.live - held);
+    this.pool.live = held;
     this.pool.endFrame();
+  }
+
+  releaseCapture() {
+    if (this.captured) this.pool.release(this.captured.target);
+    this.captured = null;
   }
 
   dispose() {
@@ -361,7 +380,7 @@ export class Compositor {
       tex.flipY = false;
       tex.needsUpdate = true;
     }
-    t = { atlas, lut, count: a.count, rows: a.height / ASCII_CELL };
+    t = { atlas, lut, count: a.count, rows: a.height / ASCII_CELL, chars: a.chars };
     this.asciiTex.set(charset, t);
     return t;
   }
@@ -421,7 +440,8 @@ export class Compositor {
     setLinear(d.bg.value, e.colors.bg!);
     const out = this.out();
     this.pass(d.mat, out);
-    this.pool.release(cells);
+    if (e.id === this.captureId && !this.captured) this.captured = { target: cells, cols, rows, chars: tex.chars };
+    else this.pool.release(cells);
     return out;
   }
 

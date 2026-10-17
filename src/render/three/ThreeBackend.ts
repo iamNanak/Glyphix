@@ -20,7 +20,7 @@ import { getSharedDevice } from './gpuDevice';
 import { Compositor, type CompositeStep } from './compositor';
 import { createExactFrames } from '@/video/exactFrames';
 import type { FrameImage, VideoFrameProvider } from '@/video/provider';
-import type { BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
+import type { AsciiCells, BackendKind, CreateBackendOptions, RenderBackend, RenderStats, View } from '../backend';
 import { BG_MODE, blankTexture, createBackgroundMaterial, createImageMaterial, createShadowMaterial, tiltPlane } from './materials';
 import {
   createGlyphMaterials,
@@ -681,6 +681,45 @@ export class ThreeBackend implements RenderBackend {
 
   prepare(list: RenderList): Promise<void> {
     return list.items.some((i) => i.kind === 'image' && i.video) ? this.frames.prepare(list) : Promise.resolve();
+  }
+
+  async captureAscii(list: RenderList, effectId: string): Promise<AsciiCells | null> {
+    this.compositor.captureId = effectId;
+    try {
+      this.render(list);
+    } finally {
+      this.compositor.captureId = null;
+    }
+    const cap = this.compositor.captured;
+    if (!cap) return null;
+    try {
+      const w = cap.cols * 2;
+      // WebGL counts texture rows from the bottom (and the grid only fills the top of its pooled target).
+      const gl = this.kind === 'webgl2';
+      const y0 = gl ? cap.target.height - cap.rows : 0;
+      const raw = await this.renderer.readRenderTargetPixelsAsync(cap.target, 0, y0, w, cap.rows);
+      const half = raw instanceof Uint16Array;
+      const at = (i: number) => (half ? THREE.DataUtils.fromHalfFloat(raw[i]!) : (raw as Float32Array)[i]!);
+      const lines: string[] = [];
+      const rgba = new Uint8Array(cap.cols * cap.rows * 4);
+      const srgb = (v: number) => Math.round(255 * Math.min(1, Math.max(0, v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055)));
+      for (let y = 0; y < cap.rows; y++) {
+        let line = '';
+        for (let x = 0; x < cap.cols; x++) {
+          const c = ((gl ? cap.rows - 1 - y : y) * w + x * 2) * 4;
+          line += cap.chars[Math.round(at(c + 4))] ?? ' ';
+          const o = (y * cap.cols + x) * 4;
+          rgba[o] = srgb(at(c));
+          rgba[o + 1] = srgb(at(c + 1));
+          rgba[o + 2] = srgb(at(c + 2));
+          rgba[o + 3] = Math.round(255 * Math.min(1, Math.max(0, at(c + 3))));
+        }
+        lines.push(line);
+      }
+      return { cols: cap.cols, rows: cap.rows, lines, rgba };
+    } finally {
+      this.compositor.releaseCapture();
+    }
   }
 
   render(list: RenderList) {

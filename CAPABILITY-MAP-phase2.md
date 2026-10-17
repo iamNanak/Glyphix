@@ -1,6 +1,6 @@
 # Capability Map: Glyphix — Phase 2 (Typography, GPU effects, ASCII)
 
-Status: **In progress — Milestone D done (`PLAN-milestone-d.md`), Milestone E done 2026-10-13 (`PLAN-milestone-e.md`), Milestone F done 2026-10-14 (`PLAN-milestone-f.md`); next: ASCII Studio (priority), then G (optional).** Built milestone by milestone, like Phase 1.
+Status: **In progress — Milestone D done (`PLAN-milestone-d.md`), Milestone E done 2026-10-13 (`PLAN-milestone-e.md`), Milestone F done 2026-10-14 (`PLAN-milestone-f.md`); next: ASCII Studio (priority, `PLAN-milestone-fplus.md`), then G (optional).** Built milestone by milestone, like Phase 1.
 Source: `RESEARCH.md` §4 (GPU typography and effects), §8.2 (Phase 2), §11 (video → ASCII); the Phase 1 code.
 
 > 🧒 **In plain words:** Phase 1 made Glyphix a good screenshot editor that can move things. Phase 2 makes it
