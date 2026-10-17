@@ -349,9 +349,14 @@ if (browserName === 'chrome') {
   const want = await page.evaluate(async () => {
     const { doc, effectId } = window.__t.colour;
     const at = window.__glyphix.export.asciiText;
-    return at.asciiFrameText(doc, effectId, window.__glyphix.state().time);
+    // Same renderer as the dialog (it follows the app's ?webgl switch).
+    const forceWebGL = window.__glyphix.editor.getState().forceWebGL;
+    const t = window.__glyphix.state().time;
+    return { same: await at.asciiFrameText(doc, effectId, t, { forceWebGL }), other: await at.asciiFrameText(doc, effectId, t, { forceWebGL: !forceWebGL }) };
   });
-  check('dialog: "Copy frame" puts the current frame\'s text on the clipboard', clip.split('\n').length === 90 && clip === want, `${clip.length} chars`);
+  const differ = [...clip].filter((ch, i) => ch !== want.other[i]).length;
+  check('dialog: "Copy frame" puts the current frame\'s text on the clipboard', clip.split('\n').length === 90 && clip === want.same, `${clip.length} chars`);
+  info('Copy frame: cells that differ between WebGPU and WebGL2 text', `${differ} of ${160 * 90}`);
 } else {
   check('dialog: "Copy frame" reports success', true, 'clipboard content not readable in headless Firefox');
 }
@@ -378,7 +383,7 @@ await page.keyboard.press('Escape');
     p.on('pageerror', (e) => perr.push(e.message));
     p.on('response', (r) => r.status() >= 400 && !/favicon/.test(r.url()) && perr.push(`${r.status()} ${r.url()}`));
     await p.setViewportSize({ width: 900, height: 700 });
-    await p.goto(`${base}/${rel}/index.html`);
+    await p.goto(`${new URL(base).origin}/${rel}/index.html`);
     await p.waitForFunction(() => document.querySelector('.demo')?.dataset.playing === 'true', null, { timeout: 20000 });
     const f1 = await p.evaluate(() => document.querySelector('.demo').dataset.frame);
     await p.waitForTimeout(700);

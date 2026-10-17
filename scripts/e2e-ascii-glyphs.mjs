@@ -140,6 +140,11 @@ if (ui) {
   await page.waitForTimeout(300);
   const note2 = await page.getByText(/Not in this font/).textContent().catch(() => '');
   check('a glyph the font lacks is reported', /😀/.test(note2 ?? ''), note2 || 'no note');
+  await page.getByRole('combobox', { name: 'ASCII look preset' }).click();
+  await page.getByRole('option', { name: 'Matrix' }).click();
+  await page.waitForTimeout(200);
+  const looked = await page.evaluate(() => window.__glyphix.state().doc.comp.layers.find((l) => l.id === 'shot').effects.at(-1));
+  check('look preset applies (Matrix) and the picker resets', looked.params.charset.static !== 4 && (await page.getByRole('combobox', { name: 'ASCII look preset' }).textContent()).includes('Apply a look'), JSON.stringify(looked.colors.ink));
 } else check('demo doc has the screenshot layer', false);
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

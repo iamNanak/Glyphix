@@ -69,5 +69,20 @@ if (hasFixture) {
   await page.waitForTimeout(500);
   await audit('video layer selected (Video section)');
 } else console.log('SKIP video layer — run scripts/make-video-fixtures.sh');
+// ASCII Studio: the ASCII card (look, font, custom characters) on the screenshot layer, then the export
+// dialog's ASCII text section.
+await page.evaluate(() => window.__glyphix.select('shot'));
+await page.getByRole('button', { name: 'Add effect' }).click();
+await page.getByRole('menuitem', { name: /^ASCII/ }).click();
+await page.getByRole('combobox', { name: 'ASCII characters' }).click();
+await page.getByRole('option', { name: 'Custom' }).click();
+await page.waitForTimeout(300);
+await audit('ASCII card (look, font, custom characters)');
+await page.keyboard.press('Control+e');
+const dialog = page.getByRole('dialog', { name: 'Export' });
+await dialog.waitFor();
+await dialog.getByRole('group', { name: 'Format' }).getByRole('button', { name: 'ASCII text', exact: true }).click();
+await page.waitForTimeout(500);
+await audit('export dialog: ASCII text');
 await browser.close();
 process.exit(failures ? 1 : 0);

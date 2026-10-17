@@ -145,9 +145,8 @@ function AsciiTextFields({ effect, edit, base }: { effect: Effect; edit: Edit; b
           aria-label="ASCII look preset"
           selectSize="sm"
           fullWidth
-          placeholder="Apply a look…"
-          value=""
-          options={ASCII_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+          value="none"
+          options={[{ value: 'none', label: 'Apply a look…' }, ...ASCII_PRESETS.map((p) => ({ value: p.id, label: p.label }))]}
           onValueChange={(id) => {
             const preset = ASCII_PRESETS.find((p) => p.id === id);
             if (preset) edit(`ASCII look: ${preset.label}`, base, applyAsciiPreset(effect, preset));

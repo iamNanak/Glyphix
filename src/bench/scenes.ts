@@ -125,10 +125,10 @@ function fxScene(): Doc {
   return doc;
 }
 
-/** The 1080p demo under an ASCII adjustment layer: 160×90 cells (12 px) over the whole comp. */
+/** The 1080p demo under an ASCII adjustment layer at default settings: 12 px font-shaped cells, 320×90 over the comp. */
 function asciiScene(): Doc {
   const doc = createDemoDoc();
-  doc.name = '1080p + ASCII 160×90';
+  doc.name = '1080p + ASCII 320×90';
   doc.comp.layers.push(createAdjustmentLayer('ascii'));
   return doc;
 }
@@ -185,7 +185,7 @@ export const SCENES: Record<string, { label: string; build: () => Doc; video?: b
   k300: { label: '300 glyphs, enter + exit + wave', build: () => glyphScene(300, true) },
   big: { label: '4K + 10 layers', build: bigScene },
   fx: { label: '4K layer + 3 effects', build: fxScene },
-  ascii: { label: '1080p + ASCII 160×90', build: asciiScene },
+  ascii: { label: '1080p + ASCII 320×90', build: asciiScene },
   video: { label: '1080p video', build: () => videoScene(false), video: true },
   videoAscii: { label: '1080p video + ASCII', build: () => videoScene(true), video: true },
 };
