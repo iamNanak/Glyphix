@@ -99,6 +99,9 @@ export interface AsciiCapture {
   target: THREE.RenderTarget;
   cols: number;
   rows: number;
+  /** Cell size, comp px. */
+  cellWidth: number;
+  cellHeight: number;
   /** Glyphs by atlas index. */
   chars: string[];
 }
@@ -440,7 +443,7 @@ export class Compositor {
     setLinear(d.bg.value, e.colors.bg!);
     const out = this.out();
     this.pass(d.mat, out);
-    if (e.id === this.captureId && !this.captured) this.captured = { target: cells, cols, rows, chars: tex.chars };
+    if (e.id === this.captureId && !this.captured) this.captured = { target: cells, cols, rows, cellWidth: size, cellHeight: size, chars: tex.chars };
     else this.pool.release(cells);
     return out;
   }

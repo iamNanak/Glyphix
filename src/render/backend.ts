@@ -22,6 +22,9 @@ export interface View {
 export interface AsciiCells {
   cols: number;
   rows: number;
+  /** Cell size in comp px (the grid starts at the comp's top-left corner). */
+  cellWidth: number;
+  cellHeight: number;
   /** One string per row, `cols` characters each (empty cells are the charset's lightest glyph). */
   lines: string[];
   /** Per cell: glyph colour (sRGB 0..255) and cell alpha (0..255), row-major. */

@@ -716,7 +716,7 @@ export class ThreeBackend implements RenderBackend {
         }
         lines.push(line);
       }
-      return { cols: cap.cols, rows: cap.rows, lines, rgba };
+      return { cols: cap.cols, rows: cap.rows, cellWidth: cap.cellWidth, cellHeight: cap.cellHeight, lines, rgba };
     } finally {
       this.compositor.releaseCapture();
     }
