@@ -4,6 +4,7 @@ import { frameBarHeight } from './frame';
 import { isPlaced } from './types';
 import { isNoOp, resolveEffects, type ResolvedEffect } from './effects';
 import { videoSourceTime } from './video';
+import { expandTextTokens } from './textTokens';
 import { exitStart, isGlyphPreset, maxRank, glyphAnimatorFor, glyphExitFor, glyphLoopFor, motionModifiers, unitCount, type GlyphLoop, type Modifiers } from './motion';
 import type {
   Color,
@@ -185,10 +186,11 @@ export function evaluate(doc: Doc, t: number): RenderList {
       case 'text': {
         const m = motionModifiers(layer.motion, t, doc.comp, 'text');
         const { enter, exit, loop } = layer.motion;
+        const shown = expandTextTokens(layer.text, doc.comp, t);
         items.push({
           kind: 'text',
           id: layer.id,
-          text: layer.text,
+          text: shown, // {frame}, {frames}, {time} already replaced
           fontId: layer.fontId,
           weight: layer.weight,
           fontSize: layer.fontSize,
@@ -202,8 +204,8 @@ export function evaluate(doc: Doc, t: number): RenderList {
           opacity: opacity * m.opacity,
           glow: sampleProp(layer.glow, t),
           glowColor: layer.glowColor,
-          enter: (enter && glyphAnimatorFor(enter, layer.text)) ?? layer.animator,
-          exit: exit && glyphExitFor(exit, layer.text, doc.comp),
+          enter: (enter && glyphAnimatorFor(enter, shown)) ?? layer.animator,
+          exit: exit && glyphExitFor(exit, shown, doc.comp),
           loop: glyphLoopFor(loop, layer.fontSize),
           effects,
           ...applyModifiers(resolveTransform(layer.transform, t), m),

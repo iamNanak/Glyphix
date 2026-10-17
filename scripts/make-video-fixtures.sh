@@ -18,4 +18,11 @@ chroma_r="if(lt(Y,120), 128, cr(X,Y))"
 [ -f clip-silent-2s.mp4 ] || ffmpeg -loglevel error -y \
   -f lavfi -i "testsrc2=size=640x360:rate=30:duration=2" \
   -vf "format=yuv420p,geq=lum='$code':cb='$chroma_y':cr='$chroma_r'" -c:v libx264 -preset veryfast -g 30 -an clip-silent-2s.mp4
+# Animated GIF: 320x180, 12 fps, 24 frames, 1 loop forever. The top 30 px encode the frame number in binary:
+# 8 blocks of 40 px, bit k = block k (white = 1). Black/white blocks survive the 256-colour palette exactly.
+gif_code="if(lt(Y,30), 255*mod(floor(N/pow(2,floor(X/40))),2), lum(X,Y))"
+[ -f clip-12fps.gif ] || ffmpeg -loglevel error -y \
+  -f lavfi -i "testsrc2=size=320x180:rate=12:duration=2" \
+  -vf "format=yuv420p,geq=lum='$gif_code':cb='if(lt(Y,30),128,cb(X,Y))':cr='if(lt(Y,30),128,cr(X,Y))',split[a][b];[a]palettegen=stats_mode=single[p];[b][p]paletteuse=dither=none" \
+  -loop 0 clip-12fps.gif
 ls -la

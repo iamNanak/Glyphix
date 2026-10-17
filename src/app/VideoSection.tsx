@@ -1,7 +1,9 @@
 // Video clip controls for an image layer that shows a video: timing, trim, loop, sound.
+import { useState } from 'react';
 import { Switch } from '@/components/wensity/switch';
 import { clipLength, type ImageLayer, type VideoClip } from '@/doc';
 import { videoMeta } from '@/video/videoAssets';
+import { videoToAscii } from './asciiStudio';
 import { useEditor } from './store';
 import { Button, Field, inputClass, Section, SliderField } from './ui';
 
@@ -19,6 +21,7 @@ export function VideoSection({ layer, edit }: { layer: ImageLayer & { video: Vid
   const frame = 1 / (meta?.fps || fps);
   const setClip = (label: string, patch: Partial<VideoClip>) => edit(label, ['video'], { ...clip, ...patch });
   const len = clipLength(clip);
+  const [error, setError] = useState<string | null>(null);
   return (
     <Section title="Video">
       {meta && (
@@ -56,6 +59,20 @@ export function VideoSection({ layer, edit }: { layer: ImageLayer & { video: Vid
           Make the canvas {len.toFixed(1)} s long
         </Button>
       )}
+      <Button
+        className="w-full justify-center"
+        onClick={() => {
+          try {
+            videoToAscii();
+            setError(null);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          }
+        }}
+      >
+        Turn into ASCII
+      </Button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
     </Section>
   );
 }

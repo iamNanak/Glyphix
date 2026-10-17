@@ -81,6 +81,9 @@ type HB = typeof import('harfbuzzjs');
  * `pages` grows. When every page is full the atlas is cleared and `generation` bumps: every cached
  * layout from an older generation must be laid out again.
  */
+/** Text layouts kept for reuse (see layout()). */
+const MAX_CACHED_LAYOUTS = 512;
+
 export class FontLibrary {
   atlas = new Uint8Array(PAGE_BYTES);
   readonly atlasSize = ATLAS_SIZE;
@@ -208,6 +211,8 @@ export class FontLibrary {
       const gen = this.generation;
       const result = this.shape(file, weight, spec, fontId);
       if (gen === this.generation) {
+        // A frame counter makes a new text every frame: keep the cache from growing without bound (oldest first).
+        if (this.layoutCache.size >= MAX_CACHED_LAYOUTS) this.layoutCache.delete(this.layoutCache.keys().next().value!);
         this.layoutCache.set(key, result);
         return result;
       }

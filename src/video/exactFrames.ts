@@ -10,6 +10,8 @@ import { VideoSampleSink, type VideoSample } from 'mediabunny';
 import type { RenderList } from '@/doc';
 import { videoSource } from './videoAssets';
 import { FrameCursor, needsRestart, TIME_EPSILON } from './frameCursor';
+import { gifFor, gifFrameIndex } from './gifAssets';
+import type { Gif } from './gifDecoder';
 import type { VideoFrameProvider } from './provider';
 
 /**
@@ -25,6 +27,8 @@ interface Slot {
   frame: VideoFrame | null;
   /** AS_BITMAP: `frame` as an ImageBitmap — what frame() returns there. */
   bitmap: ImageBitmap | null;
+  /** GIF assets: the composited frame shown (a GIF has no decode session, just a frame index). */
+  gif: { index: number; bitmap: ImageBitmap } | null;
   /** Last time requested and the time of the latest queued request (older queued ones are skipped). */
   lastTime: number;
   wanted: number;
@@ -82,7 +86,26 @@ export function createExactFrames(): ExactFrames {
     version++;
   };
 
+  /** GIF frames are already decoded; turn the wanted one into an ImageBitmap (what every browser can upload). */
+  async function seekGif(slot: Slot, layerId: string, time: number, gif: Gif): Promise<void> {
+    const index = gifFrameIndex(gif, time);
+    if (slot.gif?.index !== index) {
+      const bitmap = await createImageBitmap(new ImageData(gif.frames[index]!.rgba, gif.width, gif.height));
+      if (disposed || slots.get(layerId) !== slot) {
+        bitmap.close();
+        return;
+      }
+      slot.gif?.bitmap.close();
+      slot.gif = { index, bitmap };
+      delivered++;
+      version++;
+    }
+    slot.lastTime = time;
+  }
+
   async function seek(slot: Slot, layerId: string, time: number): Promise<void> {
+    const gif = gifFor(slot.assetId);
+    if (gif) return seekGif(slot, layerId, time, gif);
     const s = await sinkFor(slot.assetId);
     if (!s || disposed || slots.get(layerId) !== slot) return;
     const t = Math.max(time, s.firstTimestamp);
@@ -127,10 +150,10 @@ export function createExactFrames(): ExactFrames {
       slot = undefined;
     }
     if (!slot) {
-      slot = { assetId, cursor: null, frame: null, bitmap: null, lastTime: NaN, wanted: NaN, queued: 0, chain: Promise.resolve() };
+      slot = { assetId, cursor: null, frame: null, bitmap: null, gif: null, lastTime: NaN, wanted: NaN, queued: 0, chain: Promise.resolve() };
       slots.set(layerId, slot);
     }
-    if ((time === slot.wanted && slot.queued > 0) || (time === slot.lastTime && slot.frame)) return slot.chain;
+    if ((time === slot.wanted && slot.queued > 0) || (time === slot.lastTime && (slot.frame || slot.gif))) return slot.chain;
     slot.wanted = time;
     slot.queued++;
     const s = slot;
@@ -146,6 +169,8 @@ export function createExactFrames(): ExactFrames {
     if (slot.frame) setFrame(slot, null);
     slot.bitmap?.close();
     slot.bitmap = null;
+    slot.gif?.bitmap.close();
+    slot.gif = null;
     slots.delete(layerId);
   }
 
@@ -161,10 +186,16 @@ export function createExactFrames(): ExactFrames {
     frame(layerId: string, assetId: string) {
       const slot = slots.get(layerId);
       if (!slot || slot.assetId !== assetId) return null;
+      if (slot.gif) return slot.gif.bitmap;
       return AS_BITMAP ? slot.bitmap : slot.frame;
     },
     frameSpan(layerId: string) {
-      const f = slots.get(layerId)?.frame;
+      const slot = slots.get(layerId);
+      if (slot?.gif) {
+        const g = gifFor(slot.assetId)!.frames[slot.gif.index]!;
+        return { start: g.time, duration: g.duration };
+      }
+      const f = slot?.frame;
       return f ? { start: f.timestamp / 1e6, duration: (f.duration ?? 0) / 1e6 } : null;
     },
     get version() {
