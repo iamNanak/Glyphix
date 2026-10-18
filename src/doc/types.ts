@@ -4,14 +4,16 @@
 import type { Motion } from './motion';
 
 /** Bump when the saved document shape changes, and add a migration in migrations.ts. */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export type Easing =
   | { kind: 'linear' }
   | { kind: 'hold' }
   | { kind: 'bezier'; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'spring'; mass: number; stiffness: number; damping: number }
-  | { kind: 'steps'; n: number };
+  | { kind: 'steps'; n: number }
+  /** Falls onto the target and bounces `n` times, each bounce a quarter of the height of the one before. */
+  | { kind: 'bounce'; n: number };
 
 export interface Keyframe<V> {
   /** Seconds from comp start. */

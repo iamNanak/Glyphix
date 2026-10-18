@@ -271,7 +271,9 @@ export function resolveEffects(effects: readonly Effect[], t: number, sample: (p
     const params: Record<string, number> = {};
     for (const q of d.params) {
       const prop = e.params[q.key];
-      params[q.key] = prop ? sample(prop, t) : q.default;
+      // Animated values are clamped (an overshooting curve must not leave the range); a static value is used as
+      // saved, even outside the slider's range (presets and old projects rely on that).
+      params[q.key] = !prop ? q.default : 'track' in prop ? Math.min(q.max, Math.max(q.min, sample(prop, t))) : prop.static;
     }
     const colors: Record<string, Color> = {};
     for (const c of d.colors) colors[c.key] = e.colors[c.key] ?? c.default;

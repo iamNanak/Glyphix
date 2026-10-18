@@ -8,7 +8,6 @@ import { fontLibrary } from '@/text/fontLibrary';
 import { effectiveWeight, namedWeights, WEIGHT_NAMES } from '@/text/fonts';
 import { CropSection, TransformSection } from './TransformSection';
 import {
-  Easings,
   isGlyphPreset,
   isPlaced,
   NO_TILT,
@@ -17,7 +16,6 @@ import {
   type BackgroundLayer,
   type Color,
   type Doc,
-  type Easing,
   type FrameKind,
   type ImageLayer,
   type Layer,
@@ -37,18 +35,10 @@ import {
 } from '@/styling/presets';
 import { extractPalette, samplePixels, suggestBackgrounds } from '@/styling/palette';
 import { layerIndex, useEditor } from './store';
+import { EasingButton } from './EasingEditor';
+import { KeyEasing } from './timeline/KeyEasing';
+import { useKeySelection } from './timeline/keySelection';
 import { ColorField, Field, inputClass, PresetGrid, Section, Segmented, SelectField, SliderField } from './ui';
-
-const EASING_PRESETS: Record<string, Easing> = {
-  'Ease out back': Easings.easeOutBack,
-  'Ease out cubic': Easings.easeOutCubic,
-  'Ease in-out cubic': Easings.easeInOutCubic,
-  Spring: { kind: 'spring', mass: 1, stiffness: 170, damping: 12 },
-  Linear: Easings.linear,
-  Steps: { kind: 'steps', n: 4 },
-};
-
-const easingName = (e: Easing) => Object.entries(EASING_PRESETS).find(([, v]) => JSON.stringify(v) === JSON.stringify(e))?.[0] ?? 'Custom';
 
 type Edit = (label: string, path: (string | number)[], value: unknown) => void;
 
@@ -115,8 +105,29 @@ function useEdit(layer: Layer, index: number): Edit {
 
 function LayerInspector({ layer, index }: { layer: Exclude<Layer, BackgroundLayer>; index: number }) {
   const edit = useEdit(layer, index);
-  if (layer.type === 'adjustment') return <AdjustmentInspector layer={layer} edit={edit} />;
-  return layer.type === 'text' ? <TextInspector layer={layer} edit={edit} /> : <ImageInspector layer={layer} index={index} edit={edit} />;
+  const keys = useKeySelection((s) => (s.layerId === layer.id ? s.keys.size : 0));
+  const keyframes = keys > 0 && (
+    <Section title="Keyframes">
+      <p className="text-xs text-dim">
+        {keys} keyframe{keys === 1 ? '' : 's'} selected (E)
+      </p>
+      <Field label="Easing to the next key">
+        <KeyEasing side="left" />
+      </Field>
+    </Section>
+  );
+  return (
+    <>
+      {keyframes}
+      {layer.type === 'adjustment' ? (
+        <AdjustmentInspector layer={layer} edit={edit} />
+      ) : layer.type === 'text' ? (
+        <TextInspector layer={layer} edit={edit} />
+      ) : (
+        <ImageInspector layer={layer} index={index} edit={edit} />
+      )}
+    </>
+  );
 }
 
 function AdjustmentInspector({ layer, edit }: { layer: AdjustmentLayer; edit: Edit }) {
@@ -529,12 +540,9 @@ function TextInspector({ layer, edit }: { layer: TextLayer; edit: Edit }) {
       <TransformSection layer={layer} edit={edit} />
       {anim && (
         <Section title="Custom glyph animation">
-          <SelectField
-            label="Easing"
-            value={easingName(anim.easing)}
-            options={[...Object.keys(EASING_PRESETS), ...(easingName(anim.easing) === 'Custom' ? ['Custom'] : [])].map((k) => ({ value: k, label: k }))}
-            onValueChange={(k) => EASING_PRESETS[k] && edit('Easing', ['animator', 'easing'], EASING_PRESETS[k])}
-          />
+          <Field label="Easing">
+            <EasingButton label="Glyph easing" value={anim.easing} side="left" onChange={(e) => edit('Easing', ['animator', 'easing'], e)} />
+          </Field>
           <SelectField<StaggerOrder>
             label="Order"
             value={anim.order}

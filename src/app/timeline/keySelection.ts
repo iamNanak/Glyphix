@@ -2,7 +2,7 @@
 // shortcuts share: delete, nudge, copy, paste, jump to the previous/next key. Keys are named by property id and
 // frame number (`opacity|36`), so selection survives undo and never compares floats.
 import { create } from 'zustand';
-import { animatableProps, copyKeys, deleteKeys, moveKeys, pasteKeys, propAt, putKey, sampleProp, snapToFrame, type KeyClipboard, type Layer, type Prop } from '@/doc';
+import { animatableProps, copyKeys, deleteKeys, moveKeys, pasteKeys, propAt, putKey, sampleProp, setKeyEasing, snapToFrame, type Easing, type KeyClipboard, type Layer, type Prop } from '@/doc';
 import { layerIndex, useEditor } from '../store';
 
 export const keyName = (propId: string, frame: number) => `${propId}|${frame}`;
@@ -180,4 +180,42 @@ export function addKeyAtPlayhead(layerId: string, propId: string) {
   const { fps } = s.doc.comp;
   s.set(`Add ${p.label} keyframe`, toDoc(i, [{ path: p.path, value: putKey(prop, s.time, sampleProp(prop, s.time), fps) }]));
   useKeySelection.getState().setKeys(layerId, [keyName(propId, Math.round(snapToFrame(s.time, fps) * fps))]);
+}
+
+/** The easing leaving the selected keys: one value, null when they differ; `skipped` = last keys (no next key). */
+export function selectedKeysEasing(): { value: Easing | null; editable: number; skipped: number } | null {
+  const { layerId, keys } = useKeySelection.getState();
+  const doc = useEditor.getState().doc;
+  const layer = layerId ? doc.comp.layers.find((l) => l.id === layerId) : undefined;
+  if (!layer || !keys.size) return null;
+  const sel = selectionTimes(keys, doc.comp.fps);
+  const found: Easing[] = [];
+  let skipped = 0;
+  for (const p of animatableProps(layer)) {
+    const prop = sel.has(p.id) ? propAt(layer, p.path) : undefined;
+    if (!prop || !('track' in prop)) continue;
+    const last = prop.track.keys.at(-1);
+    for (const k of prop.track.keys) {
+      if (!sel.get(p.id)!.some((t) => Math.abs(t - k.t) < 0.5 / doc.comp.fps)) continue;
+      if (k === last) skipped++;
+      else found.push(k.out);
+    }
+  }
+  const same = found.every((e) => JSON.stringify(e) === JSON.stringify(found[0]));
+  return { value: found.length && same ? found[0]! : null, editable: found.length, skipped };
+}
+
+/** Set the easing leaving every selected key (last keys are skipped). */
+export function setSelectedKeysEasing(easing: Easing, coalesceKey?: string): boolean {
+  const hit = selectedLayer();
+  if (!hit) return false;
+  const { fps } = useEditor.getState().doc.comp;
+  const sel = selectionTimes(useKeySelection.getState().keys, fps);
+  const patches = animatableProps(hit.layer).flatMap((p) => {
+    const times = sel.get(p.id);
+    const prop = times && propAt(hit.layer, p.path);
+    return prop ? [{ path: p.path, value: setKeyEasing(prop, times, easing, fps) }] : [];
+  });
+  useEditor.getState().set('Keyframe easing', toDoc(hit.i, patches), coalesceKey && `${coalesceKey}:${hit.layer.id}`);
+  return true;
 }

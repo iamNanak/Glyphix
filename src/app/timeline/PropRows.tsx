@@ -1,12 +1,14 @@
 // An expanded layer's property rows: every animatable property, its keys as diamonds. Click selects (Shift
 // toggles), drag moves the selection (frame snapping; within 6 px also the playhead, the layer's in/out and other
 // keys — Alt: frames only), drag in an empty row draws a selection box, double-click jumps the playhead to a key.
-import { animatableProps, layerSpan, propAt, snapToFrame, type Layer } from '@/doc';
+import { animatableProps, easingPreset, layerSpan, propAt, snapToFrame, type Easing, type Layer } from '@/doc';
 import { layerIndex, useEditor } from '../store';
 import { addKeyAtPlayhead, keyName, moveSelectedPatches, shiftSelection, useKeySelection } from './keySelection';
 import { NAME_W, PROP_H } from './view';
 
 const SNAP_PX = 6;
+
+const easingLabel = (e: Easing) => easingPreset(e)?.label ?? 'custom easing';
 
 function startKeyDrag(e: React.PointerEvent<HTMLElement>, layer: Layer, propId: string, frame: number, pps: number) {
   if (e.button !== 0) return;
@@ -125,7 +127,8 @@ export function PropRows({ layer, pps }: { layer: Layer; pps: number }) {
                     type="button"
                     data-key={name}
                     data-layer={layer.id}
-                    aria-label={`${label} keyframe at ${k.t.toFixed(2)} s${on ? ', selected' : ''}`}
+                    data-ease={k.out.kind === 'linear' || k.out.kind === 'hold' ? k.out.kind : undefined}
+                    aria-label={`${label} keyframe at ${k.t.toFixed(2)} s, ${easingLabel(k.out)}${on ? ', selected' : ''}`}
                     aria-pressed={on}
                     className="key-diamond absolute size-3.5 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-white"
                     style={{ left: k.t * pps - 7, top: (PROP_H - 14) / 2 }}

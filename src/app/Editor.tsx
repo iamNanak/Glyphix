@@ -196,6 +196,9 @@ function useShortcuts() {
       const typing =
         target instanceof Element && target.closest('input, textarea, select, [contenteditable]') && !(target instanceof HTMLInputElement && target.type === 'range');
       if (typing) return;
+      // Inside a panel that handles its own keys (the easing editor), only Ctrl/Cmd shortcuts are global: arrows,
+      // Delete and Space must not reach the selected keys or layer.
+      if (target instanceof Element && target.closest('[data-own-keys]') && !(e.metaKey || e.ctrlKey)) return;
       const s = useEditor.getState();
       const v = useView.getState();
       const mod = e.metaKey || e.ctrlKey;
@@ -210,6 +213,11 @@ function useShortcuts() {
       if (hasKeys && (e.key === 'Delete' || e.key === 'Backspace')) return handled(), deleteSelectedKeys();
       if (hasKeys && !mod && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return handled(), nudgeSelectedKeys((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1));
       if (hasKeys && mod && key === 'c') return handled(), copySelectedKeys();
+      if (hasKeys && !mod && !e.altKey && key === 'e') {
+        // Opens the easing editor of the selected keys (timeline header, or the inspector when collapsed).
+        const open = document.querySelector<HTMLButtonElement>('[data-key-easing] button:not(:disabled)');
+        if (open) return handled(), open.click();
+      }
       if (mod && key === 'v' && ks.clipboard && pasteKeysAtPlayhead()) return handled();
       if (!mod && !e.altKey && (key === 'j' || key === 'k')) return handled(), jumpToKey(key === 'j' ? -1 : 1);
 

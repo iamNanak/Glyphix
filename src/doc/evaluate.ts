@@ -138,17 +138,22 @@ function resolveTransform(tr: Transform, t: number): ResolvedTransform {
   return {
     x: sampleProp(tr.x, t),
     y: sampleProp(tr.y, t),
-    scale: sampleProp(tr.scale, t),
+    scale: sampleIn(tr.scale, t, 0), // an overshooting curve must not mirror the layer
     rotation: sampleProp(tr.rotation, t),
   };
 }
+
+/** Sample, clamping only animated values: an overshooting curve (back, elastic) must not leave the property's
+ * range, but a static value is used exactly as saved. */
+const sampleIn = (prop: Prop<number>, t: number, lo: number, hi = Infinity) =>
+  'static' in prop ? prop.static : Math.min(hi, Math.max(lo, sampleProp(prop, t)));
 
 /** Pure: same (doc, t) → same RenderList. */
 export function evaluate(doc: Doc, t: number): RenderList {
   const items: RenderItem[] = [];
   for (const layer of doc.comp.layers) {
     if (!layer.visible || !isOnScreen(layer, doc.comp, t)) continue;
-    const opacity = sampleProp(layer.opacity, t);
+    const opacity = sampleIn(layer.opacity, t, 0, 1);
     const effects = resolveEffects(layer.effects ?? [], t, sampleProp).filter((e) => !isNoOp(e));
     switch (layer.type) {
       case 'background':
@@ -205,7 +210,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
           align: layer.align,
           tracking: layer.tracking,
           opacity: opacity * m.opacity,
-          glow: sampleProp(layer.glow, t),
+          glow: sampleIn(layer.glow, t, 0),
           glowColor: layer.glowColor,
           enter: (enter && glyphAnimatorFor(enter, shown)) ?? layer.animator,
           exit: exit && glyphExitFor(exit, shown, timed.comp),

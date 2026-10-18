@@ -25,22 +25,11 @@ import {
 } from '@/doc';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/wensity/tabs';
 import { Toggle } from '@/components/wensity/toggle';
+import { EasingButton } from './EasingEditor';
 import { useEditor } from './store';
 import { Field, Segmented, SelectField, SliderField } from './ui';
 
 type Edit = (label: string, path: (string | number)[], value: unknown) => void;
-
-export const EASINGS: Record<string, Easing> = {
-  'Ease out': Easings.easeOutCubic,
-  'Ease out back': Easings.easeOutBack,
-  'Ease in': Easings.easeInCubic,
-  'Ease in-out': Easings.easeInOutCubic,
-  Spring: { kind: 'spring', mass: 1, stiffness: 170, damping: 12 },
-  Linear: Easings.linear,
-  Instant: { kind: 'hold' },
-};
-
-export const easingName = (e: Easing) => Object.entries(EASINGS).find(([, v]) => JSON.stringify(v) === JSON.stringify(e))?.[0] ?? 'Custom';
 
 export const ORDER_OPTIONS: { value: StaggerOrder; label: string }[] = [
   { value: 'forward', label: 'First to last' },
@@ -162,14 +151,10 @@ function StaggerControls({ kind, motion, base, edit }: { kind: 'enter' | 'exit';
 }
 
 function EasingSelect({ value, onChange }: { value: Easing; onChange: (e: Easing) => void }) {
-  const name = easingName(value);
   return (
-    <SelectField
-      label="Easing"
-      value={name}
-      options={[...Object.keys(EASINGS), ...(name === 'Custom' ? ['Custom'] : [])].map((k) => ({ value: k, label: k }))}
-      onValueChange={(k) => EASINGS[k] && onChange(EASINGS[k])}
-    />
+    <Field label="Easing">
+      <EasingButton label="Easing" value={value} side="left" onChange={(e) => onChange(e)} />
+    </Field>
   );
 }
 

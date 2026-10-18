@@ -7,6 +7,7 @@ import { Select } from '@/components/wensity/select';
 import { IconButton, inputClass } from '../ui';
 import { animatableProps, propAt, type Layer } from '@/doc';
 import { keyName, layerKeyTimes, useKeySelection } from './keySelection';
+import { KeyEasing } from './KeyEasing';
 import { LayerBar } from './LayerBar';
 import { PropRows } from './PropRows';
 import { Ruler } from './Ruler';
@@ -103,6 +104,11 @@ function Header() {
           onValueChange={(f) => set('Frame rate', [{ path: ['comp', 'fps'], value: Number(f) }])}
         />
       </div>
+      {!collapsed && (
+        <div className="w-44">
+          <KeyEasing side="top" />
+        </div>
+      )}
       <div className="ml-auto flex items-center gap-1">
         {!collapsed && (
           <>

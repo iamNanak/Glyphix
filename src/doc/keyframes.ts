@@ -46,6 +46,17 @@ export function putKey(prop: Prop<number>, t: number, v: number, fps: number, ou
   return fromKeys([...keys.filter((k) => k !== old), { t: at, v, out: out ?? old?.out ?? Easings.easeInOutCubic }], v);
 }
 
+/**
+ * Set the easing leaving each key at `times` (towards the next key). The last key has no next key, so it is left
+ * as it is.
+ */
+export function setKeyEasing(prop: Prop<number>, times: readonly number[], easing: Easing, fps: number): Prop<number> {
+  const keys = keysOf(prop);
+  if (!keys.length) return prop;
+  const last = keys.reduce((a, b) => (b.t > a.t ? b : a));
+  return { track: { keys: keys.map((k) => (k !== last && times.some((t) => sameFrame(t, k.t, fps)) ? { ...k, out: easing } : k)) } };
+}
+
 /** Copied keys, relative to the earliest one (so they paste at any time). */
 export interface KeyClipboard {
   items: { propId: string; dt: number; v: number; out: Easing }[];
