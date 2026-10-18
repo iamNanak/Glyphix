@@ -78,3 +78,40 @@ font size / weight / line height / tracking (layout changes; revisit if wanted),
 - Inspector churn (≈35 write sites): the worker must keep every control's behaviour for static values identical.
 - Text keys + per-glyph animators: unit counts change when the text changes mid-animation; tested at the switch.
 - Old projects must stay byte-identical: OKLab only applies *between* keys, static colours pass through untouched.
+
+## Status (2026-10-18)
+
+Built: J1 (schema v9: colours, text, shadow/border/outline/gradient values, radius, background fill values and
+effect colours are `Prop<…>`; `sampleValue` / `resolveProps` / `Resolved<T>`; OKLab colour blending; text holds;
+generic key operations; registry with value kinds; v8 → v9 migration), J2 (inspector: `PropControl` + `KeyButton`
+next to every animatable control — static values don't re-render during playback; presets/swatches use plain
+values and `matchesStill`; canvas text measuring and inline editing use the text at the playhead), J3 (timeline
+rows for the new properties; colour/text keys move, copy/paste — only onto the same kind of property; the
+easing editor works on them).
+
+Bug found and fixed on the way: "Turn into ASCII" wrote a plain corner radius (crashed the timeline once the
+doc was v9).
+
+| Gate | Result (Chrome WebGPU) |
+|---|---|
+| 13 properties animate (frame differs from the same doc with that property frozen) | 943 – 562 249 channels changed per property |
+| preview = export | Δ ≤ 1 (backgrounds), 0 elsewhere |
+| WebGPU ≈ WebGL2 | mean Δ ≤ 0.006 |
+| OKLab | red → blue mid-point = CSS `color-mix(in oklab)` (unit test: 3 reference pairs from Chrome, 3 decimals) |
+| Text hold | switches exactly at the key |
+| v8 projects | migrate to the same document; renders byte-identical (Δ 0) at 0 / 0.7 / 2.5 s |
+| Inspector / timeline | key button, edit-at-playhead (radius, text), value shown at playhead, rows + keys |
+| Unit tests | 210/210 |
+| axe | 16/16 states |
+
+Known limits: gradient stop positions and mesh point positions are keyframable (timeline rows) but the
+inspector has no control for them yet; image shadow X offset likewise (inspector shows Y only). Glyph
+enter/exit timing uses the text at the layer's in point.
+
+Suites: full `e2e` chain (now including `e2e-easing` and `e2e-animate`) on Chrome WebGPU, WebGL2 and Firefox —
+green (`e2e-animate` 10/10 on each). The suite run caught two more things, fixed:
+- Timeline bar edges snapped to a paused playhead *between* frames (in point 0.4999 s); snap targets are now on
+  frames (unit test added).
+- `e2e-animate` on Firefox: the first text render in a fresh renderer differed while fonts loaded; the test now
+  warms each renderer up first (then Δ 0).
+Old e2e scripts that wrote the v8 format directly were updated (no checks weakened).

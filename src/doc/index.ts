@@ -15,6 +15,7 @@ export * from './video';
 export * from './timing';
 export * from './animatable';
 export * from './keyframes';
+export * from './animate';
 export * from './asciiPresets';
 export * from './textTokens';
 export * from './videoToAscii';

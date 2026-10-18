@@ -11,18 +11,18 @@ export const snapToFrame = (t: number, fps: number) => Math.round(t * fps) / fps
 /** Same frame (keys are frame-snapped, so half a frame is a safe tolerance). */
 export const sameFrame = (a: number, b: number, fps: number) => Math.abs(a - b) < 0.5 / fps;
 
-const keysOf = (prop: Prop<number>): Keyframe<number>[] => ('track' in prop ? prop.track.keys : []);
-const fromKeys = (keys: Keyframe<number>[], fallback: number): Prop<number> =>
+const keysOf = <V>(prop: Prop<V>): Keyframe<V>[] => ('track' in prop ? prop.track.keys : []);
+const fromKeys = <V>(keys: Keyframe<V>[], fallback: V): Prop<V> =>
   keys.length ? { track: { keys: [...keys].sort((a, b) => a.t - b.t) } } : { static: fallback };
 
 /**
  * Move the keys at `times` by `dt`, onto whole frames (never before 0). A moved key lands on top of (replaces) an
  * unmoved key at the same frame, like dropping a clip onto another.
  */
-export function moveKeys(prop: Prop<number>, times: readonly number[], dt: number, fps: number): Prop<number> {
+export function moveKeys<V>(prop: Prop<V>, times: readonly number[], dt: number, fps: number): Prop<V> {
   const keys = keysOf(prop);
   if (!keys.length) return prop;
-  const picked = (k: Keyframe<number>) => times.some((t) => sameFrame(t, k.t, fps));
+  const picked = (k: Keyframe<V>) => times.some((t) => sameFrame(t, k.t, fps));
   const moved = keys.filter(picked).map((k) => ({ ...k, t: Math.max(0, snapToFrame(k.t + dt, fps)) }));
   const kept = keys.filter((k) => !picked(k) && !moved.some((m) => sameFrame(m.t, k.t, fps)));
   // Two moved keys can only collide when clamped at 0: keep the later one.
@@ -31,7 +31,7 @@ export function moveKeys(prop: Prop<number>, times: readonly number[], dt: numbe
 }
 
 /** Remove the keys at `times`; removing the last key leaves the value of the earliest removed one, static. */
-export function deleteKeys(prop: Prop<number>, times: readonly number[], fps: number): Prop<number> {
+export function deleteKeys<V>(prop: Prop<V>, times: readonly number[], fps: number): Prop<V> {
   const keys = keysOf(prop);
   if (!keys.length) return prop;
   const gone = keys.filter((k) => times.some((t) => sameFrame(t, k.t, fps)));
@@ -39,7 +39,7 @@ export function deleteKeys(prop: Prop<number>, times: readonly number[], fps: nu
 }
 
 /** Add (or replace) a key at frame-snapped `t`, keeping the replaced key's easing. */
-export function putKey(prop: Prop<number>, t: number, v: number, fps: number, out?: Easing): Prop<number> {
+export function putKey<V>(prop: Prop<V>, t: number, v: V, fps: number, out?: Easing): Prop<V> {
   const at = Math.max(0, snapToFrame(t, fps));
   const keys = keysOf(prop);
   const old = keys.find((k) => sameFrame(k.t, at, fps));
@@ -50,16 +50,19 @@ export function putKey(prop: Prop<number>, t: number, v: number, fps: number, ou
  * Set the easing leaving each key at `times` (towards the next key). The last key has no next key, so it is left
  * as it is.
  */
-export function setKeyEasing(prop: Prop<number>, times: readonly number[], easing: Easing, fps: number): Prop<number> {
+export function setKeyEasing<V>(prop: Prop<V>, times: readonly number[], easing: Easing, fps: number): Prop<V> {
   const keys = keysOf(prop);
   if (!keys.length) return prop;
   const last = keys.reduce((a, b) => (b.t > a.t ? b : a));
   return { track: { keys: keys.map((k) => (k !== last && times.some((t) => sameFrame(t, k.t, fps)) ? { ...k, out: easing } : k)) } };
 }
 
+/** number / colour / text (keys only paste onto the same kind). */
+const valueKind = (v: unknown) => (Array.isArray(v) ? 'color' : typeof v);
+
 /** Copied keys, relative to the earliest one (so they paste at any time). */
 export interface KeyClipboard {
-  items: { propId: string; dt: number; v: number; out: Easing }[];
+  items: { propId: string; dt: number; v: unknown; out: Easing }[];
 }
 
 /** Copy the selected keys of one layer (`selection`: prop id → key times). */
@@ -83,14 +86,17 @@ export function copyKeys(layer: Layer, selection: ReadonlyMap<string, readonly n
 export function pasteKeys(layer: Layer, clip: KeyClipboard, t: number, fps: number): Patch[] {
   const props = animatableProps(layer);
   const byId = new Map(props.map((p) => [p.id, p]));
-  const fxParam = (id: string) => id.split(':')[2];
-  const target = (id: string) => byId.get(id) ?? (id.startsWith('fx:') ? props.find((p) => p.id.startsWith('fx:') && fxParam(p.id) === fxParam(id)) : undefined);
-  const next = new Map<string, Prop<number>>();
+  // Effect params (`fx:`) and colours (`fxc:`): by param key when the effect ids differ.
+  const [kindOf, keyOf] = [(id: string) => id.split(':')[0], (id: string) => id.split(':')[2]];
+  const fx = (id: string) => kindOf(id) === 'fx' || kindOf(id) === 'fxc';
+  const target = (id: string) => byId.get(id) ?? (fx(id) ? props.find((p) => kindOf(p.id) === kindOf(id) && keyOf(p.id) === keyOf(id)) : undefined);
+  const next = new Map<string, Prop<unknown>>();
   for (const item of clip.items) {
     const p = target(item.propId);
     if (!p) continue;
     const prop = next.get(p.id) ?? propAt(layer, p.path);
-    if (!prop) continue;
+    // Only onto a property holding the same kind of value (a colour key never lands on a number).
+    if (!prop || valueKind(item.v) !== valueKind('static' in prop ? prop.static : prop.track.keys[0]!.v)) continue;
     next.set(p.id, putKey(prop, t + item.dt, item.v, fps, item.out));
   }
   return [...next].map(([id, value]) => ({ path: byId.get(id)!.path, value }));

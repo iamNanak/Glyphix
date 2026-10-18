@@ -2,7 +2,7 @@
 // shortcuts share: delete, nudge, copy, paste, jump to the previous/next key. Keys are named by property id and
 // frame number (`opacity|36`), so selection survives undo and never compares floats.
 import { create } from 'zustand';
-import { animatableProps, copyKeys, deleteKeys, moveKeys, pasteKeys, propAt, putKey, sampleProp, setKeyEasing, snapToFrame, type Easing, type KeyClipboard, type Layer, type Prop } from '@/doc';
+import { animatableProps, copyKeys, deleteKeys, moveKeys, pasteKeys, propAt, putKey, sampleValue, setKeyEasing, snapToFrame, type Easing, type KeyClipboard, type Layer, type Prop } from '@/doc';
 import { layerIndex, useEditor } from '../store';
 
 export const keyName = (propId: string, frame: number) => `${propId}|${frame}`;
@@ -178,7 +178,7 @@ export function addKeyAtPlayhead(layerId: string, propId: string) {
   const prop = p && propAt(layer, p.path);
   if (!p || !prop || layer.locked) return;
   const { fps } = s.doc.comp;
-  s.set(`Add ${p.label} keyframe`, toDoc(i, [{ path: p.path, value: putKey(prop, s.time, sampleProp(prop, s.time), fps) }]));
+  s.set(`Add ${p.label} keyframe`, toDoc(i, [{ path: p.path, value: putKey(prop, s.time, sampleValue(prop, s.time), fps) }]));
   useKeySelection.getState().setKeys(layerId, [keyName(propId, Math.round(snapToFrame(s.time, fps) * fps))]);
 }
 

@@ -1,3 +1,4 @@
+import { toV8 } from './__fixtures__/v8';
 import { describe, expect, it } from 'vitest';
 import { bounce, cssEasing, ease, EASING_PRESETS, easingPreset, Easings, spring } from './easing';
 import { setKeyEasing } from './keyframes';
@@ -125,8 +126,8 @@ describe('setKeyEasing', () => {
 describe('schema v8', () => {
   it('v7 projects open unchanged', () => {
     const doc = createBlankDoc('v7');
-    const v7 = { ...structuredClone(doc), schemaVersion: 7 };
-    expect(migrate(v7)).toEqual({ ...doc, schemaVersion: 8 });
+    const v7 = { ...toV8(doc), schemaVersion: 7 };
+    expect(migrate(v7)).toEqual(doc);
   });
 });
 

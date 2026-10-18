@@ -42,8 +42,11 @@ const outValue = (t: number, duration: number) => (t >= duration - 1e-9 ? null :
 
 /** Edges other layers' in/out points, the playhead and the comp ends — what a dragged bar edge snaps to. */
 export function snapTargets(doc: Doc, layerId: string, playhead: number): number[] {
-  const out = [0, doc.comp.duration, playhead];
-  for (const l of doc.comp.layers) if (l.id !== layerId && l.type !== 'background') out.push(...layerSpan(l, doc.comp));
+  // On frames (a paused playhead is usually between two), so a snapped edge is always on a frame; the comp end stays
+  // exact (an out point there means "to the end").
+  const f = (t: number) => snapToFrame(t, doc.comp.fps);
+  const out = [0, doc.comp.duration, f(playhead)];
+  for (const l of doc.comp.layers) if (l.id !== layerId && l.type !== 'background') out.push(...layerSpan(l, doc.comp).map((t) => (t >= doc.comp.duration ? t : f(t))));
   return out;
 }
 

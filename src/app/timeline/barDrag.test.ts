@@ -51,5 +51,7 @@ describe('timeline bar drags', () => {
     const doc = createBlankDoc('t');
     expect(snapTargets(doc, 'headline', 1.2)).toEqual([0, 5, 1.2]);
     expect(snapTargets(doc, 'bg', 1.2)).toEqual([0, 5, 1.2, 0, 5]);
+    // A playhead paused between frames snaps edges onto the nearest frame.
+    expect(snapTargets(doc, 'headline', 0.4999)).toEqual([0, 5, 0.5]);
   });
 });

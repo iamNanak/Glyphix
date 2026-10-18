@@ -1,3 +1,4 @@
+import { toV8 } from './__fixtures__/v8';
 import { describe, expect, it } from 'vitest';
 import {
   animatableProps,
@@ -35,7 +36,7 @@ const patchLayer = (doc: Doc, id: string, patches: { path: readonly (string | nu
 
 describe('layer in/out points', () => {
   it('migrates v6 layers to "the whole comp" and renders them identically', () => {
-    const v6 = JSON.parse(JSON.stringify(createDemoDoc())) as { schemaVersion: number; comp: { layers: Record<string, unknown>[] } };
+    const v6 = toV8(createDemoDoc()) as { schemaVersion: number; comp: { layers: Record<string, unknown>[] } };
     v6.schemaVersion = 6;
     v6.comp.layers.forEach((l) => delete l.timing);
     const doc = migrate(v6);
@@ -132,7 +133,7 @@ describe('keyframe operations', () => {
     const doc = createDemoDoc();
     const t = { ...(layer(doc, 'headline') as TextLayer), effects: [createEffect('ascii')] };
     const ids = animatableProps(t).map((p) => p.id);
-    expect(ids.slice(0, 6)).toEqual(['opacity', 'x', 'y', 'scale', 'rotation', 'glow']);
+    expect(ids.slice(0, 9)).toEqual(['opacity', 'x', 'y', 'scale', 'rotation', 'text', 'color', 'glow', 'glowColor']);
     expect(ids).toContain(`fx:${t.effects[0]!.id}:size`);
     expect(ids).not.toContain(`fx:${t.effects[0]!.id}:lineHeight`); // fixed (rebuilds the glyph atlas)
     expect(animatableProps(layer(doc, 'shot')).map((p) => p.id)).toContain('tiltX');

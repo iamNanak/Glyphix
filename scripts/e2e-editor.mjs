@@ -125,9 +125,9 @@ await page.mouse.dblclick(p.x, p.y);
 await page.waitForSelector('textarea[aria-label="Edit text"]');
 await page.keyboard.type('Hello Glyphix');
 await page.keyboard.press('Escape');
-check('inline text edit', (await layer('headline')).text === 'Hello Glyphix');
+check('inline text edit', (await layer('headline')).text?.static === 'Hello Glyphix');
 await page.keyboard.press('Control+z');
-check('text edit undoes in one step', (await layer('headline')).text === 'Ship visuals that move');
+check('text edit undoes in one step', (await layer('headline')).text?.static === 'Ship visuals that move');
 
 // Layer ops: duplicate, reorder, delete, undo.
 await page.evaluate(() => window.__glyphix.select('shot'));
