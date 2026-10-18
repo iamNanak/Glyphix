@@ -73,6 +73,18 @@ Dependency direction stays one-way: `doc-model` is still the root and stays free
   noise/derivatives, 0 elsewhere).
 - Every new control is keyboard-reachable; Lighthouse accessibility stays 100.
 
+## Open decisions (2026-10-18)
+
+- **Brave: "Export failed: Cannot read properties of null (reading 'getSupportedExtensions')".** Brave on this
+  machine has no WebGPU, and when the export asks for a WebGL2 context it gets `null`; three.js then crashes on
+  it. Not reproducible in headless Brave 1.95 (25 exports in a row work, no context leak). Likely causes:
+  graphics acceleration off or GPU blocklisted (no software fallback any more), WebGL blocked for the site
+  after GPU resets, or Shields/extensions blocking WebGL. Needs the WebGL/WebGL2/WebGPU lines from `brave://gpu`.
+  Proposed fix either way: detect the missing context and show a clear message; let export reuse the
+  preview's renderer when no new context is available.
+- **AAC in MP4:** add `@mediabunny/aac-encoder` (MPL-2.0, 4.7 MB) so MP4 sound plays in QuickTime; now Opus.
+- **C8, export in a Worker:** still deferred; exports block the main thread (~5–9 s for 5 s of 1080p).
+
 ## Explicitly NOT in Phase 2
 
 Keyframe / curve editor UI (Phase 3), OCR text *replacement*, desktop app, system fonts, per-glyph variable-axis

@@ -6,3 +6,6 @@ RESEARCH.md
 *.tsbuildinfo
 scripts/fixtures/
 .claude/worktrees/
+
+# Bench screenshots (scripts/bench.mjs default output)
+/bench-*.png
