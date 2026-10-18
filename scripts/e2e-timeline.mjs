@@ -199,6 +199,17 @@ const rot = (await layer('shot')).transform.rotation;
 check('+ adds a key at the playhead with the current value', rot.track?.keys.length === 1 && near(rot.track.keys[0].t, 2), JSON.stringify(rot));
 await undo();
 
+// The ruler stays on top of the (sticky) row names when the rows scroll under it.
+await page.evaluate(() => (document.querySelector('[data-timeline-scroller]').scrollTop = 40));
+await page.waitForTimeout(200);
+const rulerOnTop = await page.evaluate(() => {
+  const r = document.querySelector('[data-timeline-scroller] [role="slider"]').getBoundingClientRect();
+  const el = document.elementFromPoint(r.left - 100, r.top + 4); // the ruler's name-column corner, where a row half under it would show
+  return !el.closest('ul');
+});
+check('the ruler stays above rows scrolled under it', rulerOnTop);
+await page.evaluate(() => (document.querySelector('[data-timeline-scroller]').scrollTop = 0));
+
 // --- Renderer: presets follow the in/out points (GPU per-glyph animation), and a layer before its in point is
 // not drawn. Fresh blank project: gradient + a headline with the per-glyph "rise" enter preset.
 const r = await page.evaluate(async () => {

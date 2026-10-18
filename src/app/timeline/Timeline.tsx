@@ -251,12 +251,13 @@ function Tracks() {
   }, [pps]);
 
   return (
+    <div className="relative min-h-0 flex-1">
     <div
       ref={scroller}
       role="region"
       aria-label="Timeline tracks"
       data-timeline-scroller
-      className="relative min-h-0 flex-1 overflow-auto overscroll-contain"
+      className="absolute inset-0 overflow-auto overscroll-contain"
       // Its own layout/paint scope: header and playhead updates never re-lay out thousands of rows.
       style={{ contain: 'strict' }}
       tabIndex={-1}
@@ -280,7 +281,7 @@ function Tracks() {
       }}
     >
       <div className="relative" style={{ width: ORIGIN + duration * pps + END_PAD, minHeight: '100%' }}>
-        <div className="sticky top-0 z-20 flex border-b border-line bg-panel">
+        <div className="sticky top-0 z-40 flex border-b border-line bg-panel">
           <div className="sticky left-0 z-30 shrink-0 border-r border-line bg-panel" style={{ width: NAME_W, height: RULER_H }} />
           <Ruler pps={pps} duration={duration} fps={fps} scrollLeft={box.scrollLeft} viewWidth={box.width} />
         </div>
@@ -291,8 +292,13 @@ function Tracks() {
           ))}
           <li aria-hidden style={{ height: after }} />
         </ul>
-        <Playhead pps={pps} scroller={scroller} />
       </div>
+    </div>
+    {/* Over the scroller, not inside it: in Firefox a line moving inside the scrolled rows repaints them every
+        frame (scrubbing ~50 ms/frame with ten rows of keys). Clipped to the track area. */}
+    <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 z-10 overflow-hidden" style={{ left: NAME_W }}>
+      <Playhead pps={pps} scroller={scroller} />
+    </div>
     </div>
   );
 }
@@ -301,19 +307,24 @@ function Tracks() {
 function Playhead({ pps, scroller }: { pps: number; scroller: React.RefObject<HTMLDivElement | null> }) {
   const el = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const node = scroller.current!;
     const place = (t: number, playing: boolean) => {
-      const x = ORIGIN + t * pps;
-      el.current!.style.transform = `translateX(${x}px)`;
+      const x = ORIGIN + t * pps; // in the scrolled content
       // While playing, page along so the line stays in view.
-      const node = scroller.current;
-      if (playing && node && (x < node.scrollLeft + ORIGIN || x > node.scrollLeft + node.clientWidth - 8)) node.scrollLeft = x - ORIGIN - 8;
+      if (playing && (x < node.scrollLeft + ORIGIN || x > node.scrollLeft + node.clientWidth - 8)) node.scrollLeft = x - ORIGIN - 8;
+      el.current!.style.transform = `translateX(${x - NAME_W - node.scrollLeft}px)`;
     };
-    const s0 = useEditor.getState();
-    place(s0.time, false);
-    return useEditor.subscribe((s, prev) => s.time !== prev.time && place(s.time, s.playing));
+    const follow = () => place(useEditor.getState().time, false);
+    follow();
+    node.addEventListener('scroll', follow, { passive: true });
+    const unsub = useEditor.subscribe((s, prev) => s.time !== prev.time && place(s.time, s.playing));
+    return () => {
+      unsub();
+      node.removeEventListener('scroll', follow);
+    };
   }, [pps, scroller]);
   return (
-    <div ref={el} aria-hidden className="pointer-events-none absolute top-0 bottom-0 left-0 z-25 w-px bg-red-500 will-change-transform">
+    <div ref={el} aria-hidden className="absolute top-0 bottom-0 left-0 w-px bg-red-500 will-change-transform">
       <div className="absolute -top-px -left-[5px] h-0 w-0 border-x-[5.5px] border-t-[7px] border-x-transparent border-t-red-500" />
     </div>
   );

@@ -3,7 +3,7 @@
 // 47 of the layers are hidden so the numbers measure the timeline, not the renderer.
 // Usage: [EXPAND=n] node scripts/e2e-timeline-perf.mjs [baseUrl]   (EXPAND: how many layers to open, default 50;
 // small timelines render every row, large ones only the rows near the viewport)
-import { launch } from './browser.mjs';
+import { browserName, launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5173';
 const EXPAND = Number(process.env.EXPAND ?? 50);
@@ -16,6 +16,10 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
   if (!ok) failures++;
 };
+// Speed gates apply to Chrome, like the export speed check. Headless Firefox is limited by its own rendering: it takes
+// ~33 ms to draw a new time even with the timeline collapsed, and with the track area merely invisible playback is
+// already ~93 % of collapsed (software compositing of the larger page), so its numbers are logged, not gated.
+const speed = (name, ok, detail) => (browserName === 'firefox' ? console.log(`INFO ${name} — ${detail} (gate applies to Chrome)`) : check(name, ok, detail));
 
 await page.goto(base);
 await page.waitForFunction(() => window.__glyphix && window.__glyphix.view().zoom < 1, null, { timeout: 30000 });
@@ -115,7 +119,7 @@ const closed2 = await frames(play(3000));
 await page.getByRole('button', { name: 'Expand timeline' }).click();
 const open = Math.max(open1.fps, open2.fps);
 const closed = Math.max(closed1.fps, closed2.fps);
-check('playback with the timeline open is within 5 % of collapsed', open >= closed * 0.95, `${open.toFixed(1)} fps open vs ${closed.toFixed(1)} collapsed`);
+speed('playback with the timeline open is within 5 % of collapsed', open >= closed * 0.95, `${open.toFixed(1)} fps open vs ${closed.toFixed(1)} collapsed`);
 
 // Drag a key of an expanded layer for ~1 s.
 await page.evaluate(() => window.__glyphix.setTime(4.9));
@@ -128,7 +132,7 @@ const drag = await frames(async () => {
   for (let i = 1; i <= 60; i++) await page.mouse.move(kb.x + kb.width / 2 + i * 3, kb.y + kb.height / 2);
   await page.mouse.up();
 });
-check('dragging a key stays smooth (p50 ≤ 17.5 ms)', drag.p50 <= 17.5, `p50 ${drag.p50.toFixed(1)} ms, p95 ${drag.p95.toFixed(1)} ms over ${drag.n} frames`);
+speed('dragging a key stays smooth (p50 ≤ 17.5 ms)', drag.p50 <= 17.5, `p50 ${drag.p50.toFixed(1)} ms, p95 ${drag.p95.toFixed(1)} ms over ${drag.n} frames`);
 check('the key drag is one undo step', await page.evaluate((id) => {
   const opacity = () => window.__glyphix.state().doc.comp.layers.find((l) => l.id === id).opacity;
   const before = JSON.stringify(opacity());
@@ -147,7 +151,7 @@ const scrub = await frames(async () => {
   for (let i = 1; i <= 60; i++) await page.mouse.move(rb.x + 10 + i * 12, rb.y + rb.height / 2);
   await page.mouse.up();
 });
-check('scrubbing stays smooth (p50 ≤ 17.5 ms)', scrub.p50 <= 17.5, `p50 ${scrub.p50.toFixed(1)} ms, p95 ${scrub.p95.toFixed(1)} ms over ${scrub.n} frames`);
+speed('scrubbing stays smooth (p50 ≤ 17.5 ms)', scrub.p50 <= 17.5, `p50 ${scrub.p50.toFixed(1)} ms, p95 ${scrub.p95.toFixed(1)} ms over ${scrub.n} frames`);
 
 console.log(errors.length ? `page errors:\n${errors.slice(0, 10).join('\n')}` : 'no page errors');
 if (errors.length) failures++;

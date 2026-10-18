@@ -75,4 +75,37 @@ e2e/bench checks.
 
 ## Status
 
-Planned 2026-10-18.
+Planned and built 2026-10-18 (branch `phase3`, local).
+
+**Done:** H1–H5. Layer in/out points (schema v7; v6 projects open unchanged), presets follow in/out (GPU glyph
+presets pixel-identical at the cut points), timeline dock (ruler = keyboard playhead, zoom, resize/collapse),
+layer bars (move/trim/preset strips/loop strip, snapping, Alt+[ / Alt+]), property rows and keyframes (select,
+Shift, box select, drag with snapping, Delete, arrows, Ctrl+A/C/V, J/K, double-click, + at playhead). Every drag
+and nudge run is one undo step.
+
+**Performance (why the timeline is built the way it is):** a Chrome trace showed the per-frame cost while playing
+is *Layerize*, which grows with paint chunks; every SVG element or CSS-transformed box is its own chunk. So keys
+are background images (`.key-diamond` in `src/index.css`), each row's summary keys are one SVG, and rows are
+virtualized (only rows near the view are in the DOM; selecting a layer anywhere scrolls its row into view so Tab
+can reach it). The playhead is an overlay above the scroller (in Firefox a line moving inside the rows repaints
+them every frame).
+
+**Gate results** (`e2e-timeline-perf`: 50 layers × 10 keyed properties, 2,000 keys, all expanded):
+
+| | Chrome WebGPU | Firefox (headless) |
+|---|---|---|
+| Playback, timeline open vs collapsed | 59.0–59.7 vs 60 fps ✅ | 40–44 vs 44–46 fps (INFO) |
+| Dragging a key, p50 | 16.7 ms ✅ | 17.2 ms (INFO) |
+| Scrubbing, p50 | 16.7 ms ✅ | 49.5 ms (INFO) |
+
+Firefox speed numbers are logged, not gated (same rule as the export speed check): headless Firefox needs ~33 ms
+to draw a new time even with the timeline collapsed, and with the track area merely invisible playback is already
+~93 % of collapsed. The Chrome numbers hold with a 630 px tall panel too.
+
+**Tests:** `e2e-timeline` 37 checks green on Chrome WebGPU, WebGL2 and Firefox; axe clean (14 states incl.
+timeline with a selected key, and collapsed); unit tests 185/185. Full suites on the three setups (Haiku run at
+c8d0b55): all functional checks green; only speed checks failed — MP4 export 5.6 s / 5.8 s vs the 5 s gate on
+Chrome (load average 3–4; `main` took 9–12 s under the same kind of load earlier) and a Firefox 4K-drag p95.
+
+**Known limits:** box select only reaches keys on screen; a very fast vertical scroll can show empty rows for a
+frame.
