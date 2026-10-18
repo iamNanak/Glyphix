@@ -28,6 +28,8 @@ const scr = async (x, y) =>
 
 await page.goto(base);
 await page.waitForFunction(() => window.__glyphix);
+// The canvas fits the comp once the renderer is up (slow on a busy machine); comp→page coordinates need it.
+await page.waitForFunction(() => window.__glyphix.view().zoom < 1, null, { timeout: 30000 });
 await page.waitForTimeout(1200);
 await page.keyboard.press('Space');
 await page.evaluate(() => window.__glyphix.setTime(4));

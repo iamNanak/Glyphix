@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Blend, ImagePlus, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Pause, Play, Plus, Redo2, Repeat, Type, Undo2 } from 'lucide-react';
+import { Activity, Blend, ImagePlus, Check, CloudOff, FolderOpen, Download, Maximize, Minus, Plus, Redo2, Type, Undo2 } from 'lucide-react';
 import { flushSave, useSaveStatus } from '@/persistence/autosave';
 import { openProjectFile, saveProjectFile } from '@/persistence/actions';
 import { PROJECT_EXTENSION } from '@/persistence/projectFile';
@@ -9,10 +9,11 @@ import { useEditor } from './store';
 import { Viewport } from './Viewport';
 import { LayersPanel } from './LayersPanel';
 import { Inspector } from './Inspector';
-import { Button, IconButton, inputClass, SelectField } from './ui';
-import { Slider } from '@/components/wensity/slider';
+import { Timeline } from './timeline/Timeline';
+import { Button, IconButton } from './ui';
 import { Switch } from '@/components/wensity/switch';
-import { isPlaced, offsetProp } from '@/doc';
+import { isPlaced, layerSpan, offsetProp } from '@/doc';
+import { BAR_LABELS, dragPatches } from './timeline/barDrag';
 import { isMediaFile, MEDIA_ACCEPT, placeMedia } from './media';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
@@ -32,7 +33,7 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
   useProjectShortcuts(pickFile, setError, () => setExportOpen(true));
 
   return (
-    <div className="grid h-full grid-rows-[48px_1fr_88px] bg-app text-sm">
+    <div className="grid h-full grid-rows-[48px_minmax(0,1fr)_auto] bg-app text-sm">
       <Toolbar backend={backend} onProjects={() => setProjectsOpen(true)} onExport={() => setExportOpen(true)} onError={setError} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <ProjectsDialog open={projectsOpen} onOpenChange={setProjectsOpen} onError={setError} pickFile={pickFile} />
@@ -166,78 +167,6 @@ function Toolbar({ backend, onProjects, onExport, onError }: { backend: string; 
 
 // ---------------------------------------------------------------------------
 
-function Timeline() {
-  const time = useEditor((s) => s.time);
-  const playing = useEditor((s) => s.playing);
-  const duration = useEditor((s) => s.doc.comp.duration);
-  const fps = useEditor((s) => s.doc.comp.fps);
-  const loop = useEditor((s) => s.loop);
-  const { setPlaying, setTime, setLoop, set } = useEditor.getState();
-  const frame = Math.floor(time * fps);
-  return (
-    <footer className="flex items-center gap-4 border-t border-line bg-panel px-4">
-      <IconButton label={playing ? 'Pause (Space)' : 'Play (Space)'} onClick={() => setPlaying(!playing)} className="h-10 w-10">
-        {playing ? <Pause size={18} /> : <Play size={18} />}
-      </IconButton>
-      <div className="flex-1">
-        <Slider
-          label="Playhead"
-          size="sm"
-          showValue={false}
-          min={0}
-          max={duration}
-          step={1 / fps}
-          value={time}
-          onValueChange={(t) => {
-            setPlaying(false);
-            setTime(t);
-          }}
-        />
-        <div className="mt-1 flex justify-between font-mono text-[11px] text-dim tabular-nums">
-          <span>
-            {time.toFixed(2)}s · frame {frame}
-          </span>
-          <span>{Math.round(duration * fps)} frames</span>
-        </div>
-      </div>
-      <div className="flex items-end gap-2">
-        <label className="space-y-1">
-          <span className="block text-[11px] text-dim">Length</span>
-          <input
-            type="number"
-            aria-label="Video length in seconds"
-            className={`${inputClass} w-20 py-1`}
-            min={0.5}
-            max={60}
-            step={0.5}
-            value={duration}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (v >= 0.5 && v <= 60) {
-                set('Video length', [{ path: ['comp', 'duration'], value: v }], 'comp-duration');
-                if (useEditor.getState().time > v) setTime(v);
-              }
-            }}
-          />
-        </label>
-        <div className="w-24">
-          <SelectField
-            label="Frame rate"
-            value={String(fps)}
-            options={[24, 30, 60].map((f) => ({ value: String(f), label: `${f} fps` }))}
-            onValueChange={(f) => set('Frame rate', [{ path: ['comp', 'fps'], value: Number(f) }])}
-          />
-        </div>
-        <IconButton label={loop ? 'Looping playback (on)' : 'Looping playback (off)'} active={loop} onClick={() => setLoop(!loop)} className="h-8">
-          <Repeat size={16} />
-        </IconButton>
-      </div>
-    </footer>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
 function usePlaybackClock() {
   useEffect(() => {
     let raf = 0;
@@ -288,6 +217,16 @@ function useShortcuts() {
       if (mod && e.key === ']') return handled(), s.moveLayer(sel.id, e.shiftKey ? 999 : 1);
       if (mod && e.key === '[') return handled(), s.moveLayer(sel.id, e.shiftKey ? -999 : -1);
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel.type !== 'background') return handled(), s.removeLayer(sel.id);
+      // Alt+[ / Alt+]: trim the selected layer's in / out point to the playhead (e.code: Alt changes e.key on macOS).
+      if (e.altKey && !mod && (e.code === 'BracketLeft' || e.code === 'BracketRight') && sel.type !== 'background') {
+        handled();
+        const part = e.code === 'BracketLeft' ? 'in' : 'out';
+        const [a, b] = layerSpan(sel, s.doc.comp);
+        const { fps, duration } = s.doc.comp;
+        const patches = dragPatches(part, sel, s.time - (part === 'in' ? a : b), { fps, duration, pps: 1, targets: [] });
+        const i = layerIndex(s.doc, sel.id);
+        return s.set(BAR_LABELS[part], patches.map((p) => ({ path: ['comp', 'layers', i, ...p.path], value: p.value })));
+      }
       if (e.key === 'Enter' && sel.type === 'text') return handled(), startTextEdit(sel);
       const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
       const dir = arrows[e.key];

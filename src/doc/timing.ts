@@ -14,8 +14,9 @@ export function layerSpan(layer: Layer, comp: Pick<Comp, 'duration'>): [number, 
 
 export function isOnScreen(layer: Layer, comp: Pick<Comp, 'duration'>, t: number): boolean {
   const [a, b] = layerSpan(layer, comp);
-  // The last frame of the comp still shows layers that run to the end.
-  return t >= a && (t < b || (b >= comp.duration && t <= b));
+  // A layer that starts at 0 / runs to the end is never cut on that side (the comp's last frame, and times
+  // outside the comp, look exactly as they did before in/out points existed).
+  return (a <= 0 || t >= a) && (b >= comp.duration || t < b);
 }
 
 /**
