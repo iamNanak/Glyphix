@@ -5,6 +5,7 @@ import { isPlaced } from './types';
 import { isNoOp, resolveEffects, type ResolvedEffect } from './effects';
 import { videoSourceTime } from './video';
 import { expandTextTokens } from './textTokens';
+import { isOnScreen, layerSpan, motionOnComp } from './timing';
 import { exitStart, isGlyphPreset, maxRank, glyphAnimatorFor, glyphExitFor, glyphLoopFor, motionModifiers, unitCount, type GlyphLoop, type Modifiers } from './motion';
 import type {
   Color,
@@ -146,7 +147,7 @@ function resolveTransform(tr: Transform, t: number): ResolvedTransform {
 export function evaluate(doc: Doc, t: number): RenderList {
   const items: RenderItem[] = [];
   for (const layer of doc.comp.layers) {
-    if (!layer.visible) continue;
+    if (!layer.visible || !isOnScreen(layer, doc.comp, t)) continue;
     const opacity = sampleProp(layer.opacity, t);
     const effects = resolveEffects(layer.effects ?? [], t, sampleProp).filter((e) => !isNoOp(e));
     switch (layer.type) {
@@ -157,7 +158,8 @@ export function evaluate(doc: Doc, t: number): RenderList {
         if (effects.length && opacity > 0) items.push({ kind: 'adjustment', id: layer.id, opacity, effects });
         break;
       case 'image': {
-        const m = motionModifiers(layer.motion, t, doc.comp, 'image');
+        const timed = motionOnComp(layer.motion, layer, doc.comp);
+        const m = motionModifiers(timed.motion, t, timed.comp, 'image');
         const tr = applyModifiers(resolveTransform(layer.transform, t), m);
         items.push({
           kind: 'image',
@@ -184,8 +186,9 @@ export function evaluate(doc: Doc, t: number): RenderList {
         break;
       }
       case 'text': {
-        const m = motionModifiers(layer.motion, t, doc.comp, 'text');
-        const { enter, exit, loop } = layer.motion;
+        const timed = motionOnComp(layer.motion, layer, doc.comp);
+        const m = motionModifiers(timed.motion, t, timed.comp, 'text');
+        const { enter, exit, loop } = timed.motion;
         const shown = expandTextTokens(layer.text, doc.comp, t);
         items.push({
           kind: 'text',
@@ -205,7 +208,7 @@ export function evaluate(doc: Doc, t: number): RenderList {
           glow: sampleProp(layer.glow, t),
           glowColor: layer.glowColor,
           enter: (enter && glyphAnimatorFor(enter, shown)) ?? layer.animator,
-          exit: exit && glyphExitFor(exit, shown, doc.comp),
+          exit: exit && glyphExitFor(exit, shown, timed.comp),
           loop: glyphLoopFor(loop, layer.fontSize),
           effects,
           ...applyModifiers(resolveTransform(layer.transform, t), m),
@@ -320,14 +323,16 @@ export function animatorEnd(anim: GlyphAnimator, unitCount: number): number {
 }
 
 /** A moment when a text layer is fully at rest (entered, not yet exiting), for editing. */
-export function restTime(layer: TextLayer, comp: Pick<Comp, 'duration'>): number {
-  const { enter, exit } = layer.motion;
+export function restTime(layer: TextLayer, fullComp: Pick<Comp, 'duration'>): number {
+  const { motion, comp } = motionOnComp(layer.motion, layer, fullComp);
+  const { enter, exit } = motion;
   // Enter presets (whole-layer or per glyph) finish exactly at start + duration.
   let t = enter ? enter.start + enter.duration : 0;
   const custom = layer.animator;
   if (custom && !(enter && isGlyphPreset(enter.preset))) t = Math.max(t, animatorEnd(custom, unitCount(layer.text, custom.unit)));
   if (exit) t = Math.min(t, exitStart(exit, comp) - 1e-3);
-  return Math.min(comp.duration, Math.max(0, t));
+  const [a, b] = layerSpan(layer, fullComp);
+  return Math.min(b, Math.max(a, t));
 }
 
 /**
@@ -340,10 +345,11 @@ export function posterTime(doc: Doc): number {
   let exiting = comp.duration;
   for (const l of comp.layers) {
     if (!isPlaced(l) || !l.visible) continue;
-    const { enter, exit } = l.motion;
+    const timed = motionOnComp(l.motion, l, comp);
+    const { enter, exit } = timed.motion;
     if (l.type === 'text') entered = Math.max(entered, Math.min(comp.duration, restTime({ ...l, motion: { ...l.motion, exit: null } }, comp)));
     else if (enter) entered = Math.max(entered, enter.start + enter.duration);
-    if (exit) exiting = Math.min(exiting, exitStart(exit, comp));
+    if (exit) exiting = Math.min(exiting, exitStart(exit, timed.comp));
   }
   if (exiting >= comp.duration) return Math.max(0, comp.duration - 0.05);
   return Math.max(0, exiting > entered ? (entered + exiting) / 2 : exiting - 0.05);

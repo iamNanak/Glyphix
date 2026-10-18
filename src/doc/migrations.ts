@@ -69,6 +69,11 @@ const MIGRATIONS: Record<number, (doc: Json) => Json> = {
     const comp = doc.comp as Json & { layers: Json[] };
     return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => (l.type === 'image' ? { video: null, ...l } : l)) } };
   },
+  // v6 → v7: layers gain in/out points (on for the whole comp, as before).
+  6: (doc) => {
+    const comp = doc.comp as Json & { layers: Json[] };
+    return { ...doc, comp: { ...comp, layers: comp.layers.map((l) => ({ timing: { in: 0, out: null }, ...l })) } };
+  },
   // v5 → v6: effects gain text settings; existing ASCII effects keep their square cells.
   5: (doc) => {
     const comp = doc.comp as Json & { layers: Json[] };

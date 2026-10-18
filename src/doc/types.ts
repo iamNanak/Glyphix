@@ -4,7 +4,7 @@
 import type { Motion } from './motion';
 
 /** Bump when the saved document shape changes, and add a migration in migrations.ts. */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export type Easing =
   | { kind: 'linear' }
@@ -61,10 +61,18 @@ export interface Effect {
   text: Record<string, string>;
 }
 
+/** When a layer is on screen, in comp seconds: from `in` until `out` (null = until the comp ends). */
+export interface LayerTiming {
+  in: number;
+  out: number | null;
+}
+
 export interface LayerBase {
   id: string;
   name: string;
   visible: boolean;
+  /** Backgrounds ignore it (always on). */
+  timing: LayerTiming;
   locked: boolean;
   opacity: Prop<number>;
   /** Applied in order, bottom of the list last. */
