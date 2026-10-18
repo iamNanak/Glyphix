@@ -48,9 +48,15 @@ const props = await page.evaluate(async () => {
   const l = window.__glyphix.state().doc.comp.layers[1];
   return { props: animatableProps(l).length, keyed: animatableProps(l).filter((p) => 'track' in p.path.reduce((o, k) => o[k], l)).length };
 });
-for (let n = 49; n >= 0; n--) await page.getByRole('button', { name: `Show Layer ${n} properties`, exact: true }).click();
+// The list is virtualized: scroll each layer into view (bottom up, so nothing above has moved yet) and expand it.
+for (let n = 0; n < 50; n++) {
+  await page.evaluate((y) => (document.querySelector('[data-timeline-scroller]').scrollTop = y), (49 - n) * 28);
+  await page.getByRole('button', { name: `Show Layer ${n} properties`, exact: true }).click();
+}
+await page.evaluate(() => (document.querySelector('[data-timeline-scroller]').scrollTop = 0));
+await page.waitForTimeout(300);
 const keyCount = await page.locator('[data-key]').count();
-check('stress doc: 50 layers expanded, 10 keyed properties each', props.keyed >= 10 && keyCount >= 2000, `${props.keyed} keyed of ${props.props} properties; ${keyCount} key diamonds in the DOM`);
+check('stress doc: 50 layers expanded, 10 keyed properties each, rows virtualized', props.keyed >= 10 && keyCount > 0 && keyCount < 600, `${props.keyed} keyed of ${props.props} properties; ${keyCount} of 2000 key diamonds in the DOM`);
 
 /** rAF intervals (ms) while `during` runs. */
 const frames = async (during) => {

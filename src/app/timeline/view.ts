@@ -8,6 +8,8 @@ export const TRACK_PAD = 8;
 /** x of time 0 in the scrolled content. */
 export const ORIGIN = NAME_W + TRACK_PAD;
 export const ROW_H = 28;
+/** A property row under an expanded layer. */
+export const PROP_H = ROW_H - 4;
 export const RULER_H = 24;
 export const HEADER_H = 44;
 export const MIN_H = 120;

@@ -5,12 +5,12 @@ import { Blend, ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, Film, Image, 
 import { useEditor } from '../store';
 import { Select } from '@/components/wensity/select';
 import { IconButton, inputClass } from '../ui';
-import { animatableProps, propAt } from '@/doc';
+import { animatableProps, propAt, type Layer } from '@/doc';
 import { keyName, layerKeyTimes, useKeySelection } from './keySelection';
 import { LayerBar } from './LayerBar';
 import { PropRows } from './PropRows';
 import { Ruler } from './Ruler';
-import { END_PAD, fitZoom, HEADER_H, NAME_W, ORIGIN, ROW_H, RULER_H, useTimelineView, zoomLimits } from './view';
+import { END_PAD, fitZoom, HEADER_H, NAME_W, ORIGIN, PROP_H, ROW_H, RULER_H, useTimelineView, zoomLimits } from './view';
 
 export function Timeline() {
   const collapsed = useTimelineView((s) => s.collapsed);
@@ -147,15 +147,43 @@ function Timecode({ fps, duration }: { fps: number; duration: number }) {
 
 // ---------------------------------------------------------------------------
 
+/** How many property rows a layer can show (cached per layer object: the store selector runs every frame). */
+const propCounts = new WeakMap<Layer, number>();
+const propCount = (l: Layer) => propCounts.get(l) ?? (propCounts.set(l, animatableProps(l).length), propCounts.get(l)!);
+/** Layers this far (px) outside the scroller are still rendered, so a quick scroll never shows blank rows. */
+const OVERSCAN = 84;
+
 function Tracks() {
   const scroller = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ width: 0, scrollLeft: 0 });
+  const [box, setBox] = useState({ width: 0, height: 0, scrollLeft: 0, scrollTop: 0 });
   const duration = useEditor((s) => s.doc.comp.duration);
   const fps = useEditor((s) => s.doc.comp.fps);
   const zoom = useTimelineView((s) => s.zoom);
-  // Top of the list = front-most layer, as in the Layers panel.
-  const ids = useEditor((s) => s.doc.comp.layers.map((l) => l.id).join('\u0001'));
-  const rows = ids.split('\u0001').reverse();
+  // Top of the list = front-most layer, as in the Layers panel. Only layers near the viewport are rendered (a
+  // few thousand key buttons make every frame of playback expensive); row heights are fixed, so offsets are sums.
+  const spec = useEditor((s) => s.doc.comp.layers.map((l) => `${l.id}\u0002${propCount(l)}`).join('\u0001'));
+  const expanded = useTimelineView((s) => s.expanded);
+  const { rows, total } = useMemo(() => {
+    let top = 0;
+    const rows = spec
+      .split('\u0001')
+      .filter(Boolean)
+      .reverse()
+      .map((r) => {
+        const [id, n] = r.split('\u0002') as [string, string];
+        const h = ROW_H + (expanded[id] ? Number(n) * PROP_H : 0);
+        top += h;
+        return { id, top: top - h, h };
+      });
+    return { rows, total: top };
+  }, [spec, expanded]);
+  const y0 = box.scrollTop - RULER_H - OVERSCAN;
+  const y1 = box.scrollTop + box.height - RULER_H + OVERSCAN;
+  const shown = rows.filter((r) => r.top + r.h > y0 && r.top < y1);
+  const first = shown[0];
+  const last = shown[shown.length - 1];
+  const before = first?.top ?? 0;
+  const after = last ? total - last.top - last.h : 0;
 
   const fit = fitZoom(box.width, duration);
   lastFit = fit;
@@ -165,7 +193,11 @@ function Tracks() {
   useLayoutEffect(() => {
     const node = scroller.current!;
     let raf = 0;
-    const measure = () => setBox({ width: node.clientWidth, scrollLeft: node.scrollLeft });
+    const measure = () =>
+      setBox((b) => {
+        const next = { width: node.clientWidth, height: node.clientHeight, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop };
+        return b.width === next.width && b.height === next.height && b.scrollLeft === next.scrollLeft && b.scrollTop === next.scrollTop ? b : next;
+      });
     const onScroll = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(measure);
@@ -241,9 +273,11 @@ function Tracks() {
           <Ruler pps={pps} duration={duration} fps={fps} scrollLeft={box.scrollLeft} viewWidth={box.width} />
         </div>
         <ul aria-label="Timeline layers">
-          {rows.map((id) => (
-            <LayerRow key={id} id={id} pps={pps} />
+          <li aria-hidden style={{ height: before }} />
+          {shown.map((r) => (
+            <LayerRow key={r.id} id={r.id} pps={pps} />
           ))}
+          <li aria-hidden style={{ height: after }} />
         </ul>
         <Playhead pps={pps} scroller={scroller} />
       </div>

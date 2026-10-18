@@ -5,10 +5,9 @@ import { Plus } from 'lucide-react';
 import { animatableProps, layerSpan, propAt, snapToFrame, type Layer } from '@/doc';
 import { layerIndex, useEditor } from '../store';
 import { addKeyAtPlayhead, keyName, moveSelectedPatches, shiftSelection, useKeySelection } from './keySelection';
-import { NAME_W, ROW_H } from './view';
+import { NAME_W, PROP_H } from './view';
 
 const SNAP_PX = 6;
-const PROP_H = ROW_H - 4;
 
 function startKeyDrag(e: React.PointerEvent<HTMLElement>, layer: Layer, propId: string, frame: number, pps: number) {
   if (e.button !== 0) return;
