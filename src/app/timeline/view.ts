@@ -3,6 +3,10 @@
 import { create } from 'zustand';
 
 export const NAME_W = 200;
+/** Gap between the name column and time 0 (so keys at 0 are fully visible). */
+export const TRACK_PAD = 8;
+/** x of time 0 in the scrolled content. */
+export const ORIGIN = NAME_W + TRACK_PAD;
 export const ROW_H = 28;
 export const RULER_H = 24;
 export const HEADER_H = 44;
@@ -38,6 +42,9 @@ function save(s: Saved) {
 interface TimelineView extends Saved {
   /** Pixels per second; null = fit the whole comp in the visible width. */
   zoom: number | null;
+  /** Layers whose property rows are open. */
+  expanded: Readonly<Record<string, boolean>>;
+  toggleExpanded(id: string): void;
   setHeight(h: number): void;
   setCollapsed(c: boolean): void;
   setZoom(z: number | null): void;
@@ -46,6 +53,8 @@ interface TimelineView extends Saved {
 export const useTimelineView = create<TimelineView>((set, get) => ({
   ...load(),
   zoom: null,
+  expanded: {},
+  toggleExpanded: (id) => set((s) => ({ expanded: { ...s.expanded, [id]: !s.expanded[id] } })),
   setHeight(h) {
     const height = Math.round(Math.max(MIN_H, Math.min(h, window.innerHeight * 0.7)));
     set({ height });
@@ -59,7 +68,7 @@ export const useTimelineView = create<TimelineView>((set, get) => ({
 }));
 
 /** Pixels per second that fit `duration` into a track area `width` px wide. */
-export const fitZoom = (width: number, duration: number) => Math.max(1, (width - NAME_W - END_PAD) / Math.max(duration, 0.1));
+export const fitZoom = (width: number, duration: number) => Math.max(1, (width - ORIGIN - END_PAD) / Math.max(duration, 0.1));
 
 /** Zoom range: from "whole comp" (or 10 px/s) to one frame = 40 px. */
 export const zoomLimits = (fit: number, fps: number) => [Math.min(fit, 10), fps * 40] as const;

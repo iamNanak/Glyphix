@@ -14,6 +14,7 @@ import { Button, IconButton } from './ui';
 import { Switch } from '@/components/wensity/switch';
 import { isPlaced, layerSpan, offsetProp } from '@/doc';
 import { BAR_LABELS, dragPatches } from './timeline/barDrag';
+import { copySelectedKeys, deleteSelectedKeys, jumpToKey, nudgeSelectedKeys, pasteKeysAtPlayhead, useKeySelection } from './timeline/keySelection';
 import { isMediaFile, MEDIA_ACCEPT, placeMedia } from './media';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
@@ -201,6 +202,16 @@ function useShortcuts() {
       const key = e.key.toLowerCase();
       const sel = s.doc.comp.layers.find((l) => l.id === s.selectedId);
       const handled = () => e.preventDefault();
+
+      // Selected keyframes take Delete, arrows, Ctrl+C and Escape before the layer does.
+      const ks = useKeySelection.getState();
+      const hasKeys = ks.layerId !== null && ks.keys.size > 0;
+      if (hasKeys && e.key === 'Escape') return ks.clear();
+      if (hasKeys && (e.key === 'Delete' || e.key === 'Backspace')) return handled(), deleteSelectedKeys();
+      if (hasKeys && !mod && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return handled(), nudgeSelectedKeys((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1));
+      if (hasKeys && mod && key === 'c') return handled(), copySelectedKeys();
+      if (mod && key === 'v' && ks.clipboard && pasteKeysAtPlayhead()) return handled();
+      if (!mod && !e.altKey && (key === 'j' || key === 'k')) return handled(), jumpToKey(key === 'j' ? -1 : 1);
 
       if (mod && key === 'z') return handled(), e.shiftKey ? s.redo() : s.undo();
       if (mod && key === 'y') return handled(), s.redo();

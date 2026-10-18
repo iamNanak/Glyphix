@@ -39,5 +39,10 @@ export function animatableProps(layer: Layer): AnimatableProp[] {
 export function propAt(layer: Layer, path: Path): Prop<number> | undefined {
   let v: unknown = layer;
   for (const k of path) v = v == null ? undefined : (v as Record<string | number, unknown>)[k];
+  if (v === undefined && path[0] === 'effects') {
+    const e = layer.effects?.[path[1] as number];
+    const def = e && effectDef(e.kind).params.find((q) => q.key === path[3]);
+    if (def) return { static: def.default };
+  }
   return v as Prop<number> | undefined;
 }

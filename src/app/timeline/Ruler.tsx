@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { snapToFrame } from '@/doc';
 import { useEditor } from '../store';
-import { NAME_W, RULER_H } from './view';
+import { ORIGIN, RULER_H, TRACK_PAD } from './view';
 
 /**
  * Tick spacing in seconds: the smallest "nice" step at least `minPx` wide. Below a second the steps are frame
@@ -48,7 +48,7 @@ export function Ruler({ pps, duration, fps, scrollLeft, viewWidth }: { pps: numb
 
   const major = tickStep(pps, fps, 64);
   const minor = tickStep(pps, fps, 8);
-  const from = Math.max(0, Math.floor((scrollLeft - NAME_W) / pps / major) * major);
+  const from = Math.max(0, Math.floor((scrollLeft - ORIGIN) / pps / major) * major);
   const to = Math.min(duration, (scrollLeft + viewWidth) / pps + major);
   const ticks: { t: number; major: boolean }[] = [];
   for (let i = Math.round(from / minor); i * minor <= to + 1e-9; i++) {
@@ -65,7 +65,7 @@ export function Ruler({ pps, duration, fps, scrollLeft, viewWidth }: { pps: numb
       aria-valuemin={0}
       aria-valuemax={duration}
       className="relative cursor-ew-resize touch-none select-none outline-none focus-visible:bg-accent/10"
-      style={{ width, height: RULER_H }}
+      style={{ width, height: RULER_H, marginLeft: TRACK_PAD }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);

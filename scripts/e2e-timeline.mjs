@@ -17,6 +17,7 @@ const check = (name, ok, detail = '') => {
 };
 const layer = (id) => page.evaluate((id) => window.__glyphix.state().doc.comp.layers.find((l) => l.id === id), id);
 const near = (a, b) => Math.abs(a - b) < 1e-6;
+const state = () => page.evaluate(() => window.__glyphix.state());
 const undo = async () => {
   await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Control+z');
@@ -110,6 +111,93 @@ await sep.focus();
 await page.keyboard.press('ArrowUp');
 check('expand + keyboard resize', (await tracks.count()) === 1 && Number(await sep.getAttribute('aria-valuenow')) === h0 + 24);
 await sep.press('ArrowDown');
+
+// --- Keyframes (H4) on the screenshot: opacity 0 → 0.8 s, y 0 → 1 s, scale 0 → 1 s.
+const keyTimes = async (path) => {
+  const l = await layer('shot');
+  const p = path.reduce((o, k) => o[k], l);
+  return 'track' in p ? p.track.keys.map((k) => +k.t.toFixed(4)) : [];
+};
+await page.evaluate(() => window.__glyphix.editor.getState().setPlaying(false)); // applying a preset starts playback
+const pressed = () => tracks.locator('[data-key][aria-pressed="true"]').count();
+await page.getByRole('button', { name: 'Show Screenshot properties' }).click();
+const props = tracks.getByRole('list', { name: 'Screenshot properties' });
+const opKey = (t) => props.getByRole('button', { name: new RegExp(`^Opacity keyframe at ${t}`) });
+check('expanding a layer shows its property rows with keys', (await props.getByRole('listitem').count()) >= 7 && (await props.locator('[data-key]').count()) >= 6);
+check('the layer row shows merged summary keys', (await tracks.getByRole('listitem', { name: 'Screenshot' }).locator('span.rotate-45[aria-hidden]').count()) >= 3);
+
+// Click selects; drag moves by frames (snapping) as one undo step.
+let kb = await opKey('0.80').boundingBox();
+await page.mouse.click(kb.x + kb.width / 2, kb.y + kb.height / 2);
+check('click selects a key', (await pressed()) === 1 && (await opKey('0.80').getAttribute('aria-pressed')) === 'true');
+await page.evaluate(() => window.__glyphix.setTime(4.5)); // keep the playhead out of snapping range
+await drag(kb.x + kb.width / 2, kb.y + kb.height / 2, pps * 0.5);
+let op = await keyTimes(['opacity']);
+check('drag moves the key, frame-snapped', op.length === 2 && op[0] === 0 && Math.abs(op[1] - 1.3) < 0.04 && Math.abs(op[1] * 30 - Math.round(op[1] * 30)) < 1e-6, JSON.stringify(op));
+await undo();
+check('one undo reverts the key drag', JSON.stringify(await keyTimes(['opacity'])) === '[0,0.8]');
+
+// Shift-click adds; arrows nudge the selection by frames; one undo.
+kb = await opKey('0.80').boundingBox();
+await page.mouse.click(kb.x + kb.width / 2, kb.y + kb.height / 2);
+const yKey = props.getByRole('button', { name: /^Position Y keyframe at 1\.00/ });
+const yb = await yKey.boundingBox();
+await page.keyboard.down('Shift');
+await page.mouse.click(yb.x + yb.width / 2, yb.y + yb.height / 2);
+await page.keyboard.up('Shift');
+check('Shift-click adds to the selection', (await pressed()) === 2);
+await page.keyboard.press('ArrowRight');
+await page.keyboard.press('Shift+ArrowRight');
+const nudged = [await keyTimes(['opacity']), await keyTimes(['transform', 'y'])];
+check('arrows nudge selected keys (Shift = 10 frames)', Math.abs(nudged[0][1] - (0.8 + 11 / 30)) < 1e-3 && Math.abs(nudged[1][1] - (1 + 11 / 30)) < 1e-3, JSON.stringify(nudged));
+await undo();
+check('nudges are one undo step', JSON.stringify(await keyTimes(['opacity'])) === '[0,0.8]' && JSON.stringify(await keyTimes(['transform', 'y'])) === '[0,1]');
+
+// Box select in an empty part of the rows: every key at t ≤ ~1.1 s on opacity, y (and rows between).
+await page.keyboard.press('Escape');
+check('Escape clears the key selection', (await pressed()) === 0);
+const opRow = await props.getByRole('listitem', { name: 'Opacity' }).boundingBox();
+const yRow = await props.getByRole('listitem', { name: 'Position Y' }).boundingBox();
+const x0 = opRow.x + 208 + 1.15 * pps; // time 0 is 8 px after the 200 px name column
+await page.mouse.move(x0, opRow.y + 2);
+await page.mouse.down();
+await page.mouse.move(x0 - 0.8 * pps, yRow.y + yRow.height / 2, { steps: 4 });
+await page.mouse.move(opRow.x + 208 + 0.4 * pps, yRow.y + yRow.height - 2, { steps: 4 });
+await page.mouse.up();
+check('box select picks the keys inside the box', (await pressed()) === 2, `${await pressed()} selected`);
+
+// Delete removes them (opacity loses its last-but-one key), undo restores.
+await page.keyboard.press('Delete');
+check('Delete removes selected keys (not the layer)', (await layer('shot')) && JSON.stringify(await keyTimes(['opacity'])) === '[0]' && JSON.stringify(await keyTimes(['transform', 'y'])) === '[0]');
+await undo();
+check('undo restores them', JSON.stringify(await keyTimes(['opacity'])) === '[0,0.8]');
+
+// Ctrl+A (in the timeline) selects every key; Ctrl+C / Ctrl+V pastes them at the playhead.
+await opKey('0.00').focus();
+await page.keyboard.press('Control+a');
+const all = await pressed();
+check('Ctrl+A selects every key of the layer', all >= 6, `${all}`);
+await page.keyboard.press('Control+c');
+await page.evaluate(() => window.__glyphix.setTime(3));
+await page.keyboard.press('Control+v');
+check('Ctrl+V pastes at the playhead, keeping spacing', JSON.stringify(await keyTimes(['opacity'])) === '[0,0.8,3,3.8]' && JSON.stringify(await keyTimes(['transform', 'y'])) === '[0,1,3,4]', JSON.stringify(await keyTimes(['opacity'])));
+check('pasted keys become the selection', (await pressed()) === all);
+await undo();
+
+// J / K jump between keys; double-click moves the playhead to a key; + adds a key at the playhead.
+await page.evaluate(() => window.__glyphix.setTime(0.5));
+await page.keyboard.press('k');
+const tK = (await state()).time;
+await page.keyboard.press('j');
+const tJ = (await state()).time;
+check('K / J jump to the next / previous key', near(tK, 0.8) && near(tJ, 0), `${tK}, ${tJ}`);
+await props.getByRole('button', { name: /^Position Y keyframe at 1\.00/ }).dblclick();
+check('double-click a key moves the playhead to it', near((await state()).time, 1));
+await page.evaluate(() => window.__glyphix.setTime(2));
+await props.getByRole('button', { name: 'Add Rotation keyframe at playhead' }).click();
+const rot = (await layer('shot')).transform.rotation;
+check('+ adds a key at the playhead with the current value', rot.track?.keys.length === 1 && near(rot.track.keys[0].t, 2), JSON.stringify(rot));
+await undo();
 
 // --- Renderer: presets follow the in/out points (GPU per-glyph animation), and a layer before its in point is
 // not drawn. Fresh blank project: gradient + a headline with the per-glyph "rise" enter preset.

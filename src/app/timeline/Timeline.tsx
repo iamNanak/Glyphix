@@ -1,13 +1,16 @@
 // The timeline dock under the canvas: transport header, time ruler, one row per layer. Only the playhead line
 // and timecode follow the clock (store subscriptions writing to the DOM); nothing here re-renders while playing.
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Blend, ChevronDown, ChevronUp, Eye, EyeOff, Film, Image, Lock, Maximize2, Pause, Play, Repeat, Square, Type, Unlock, ZoomIn, ZoomOut } from 'lucide-react';
+import { memo, useEffect, useMemo, useLayoutEffect, useRef, useState } from 'react';
+import { Blend, ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, Film, Image, Lock, Maximize2, Pause, Play, Repeat, Square, Type, Unlock, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEditor } from '../store';
 import { Select } from '@/components/wensity/select';
 import { IconButton, inputClass } from '../ui';
+import { animatableProps, propAt } from '@/doc';
+import { keyName, layerKeyTimes, useKeySelection } from './keySelection';
 import { LayerBar } from './LayerBar';
+import { PropRows } from './PropRows';
 import { Ruler } from './Ruler';
-import { END_PAD, fitZoom, HEADER_H, NAME_W, ROW_H, RULER_H, useTimelineView, zoomLimits } from './view';
+import { END_PAD, fitZoom, HEADER_H, NAME_W, ORIGIN, ROW_H, RULER_H, useTimelineView, zoomLimits } from './view';
 
 export function Timeline() {
   const collapsed = useTimelineView((s) => s.collapsed);
@@ -189,7 +192,7 @@ function Tracks() {
       e.preventDefault();
       const x = e.clientX - node.getBoundingClientRect().left;
       const cur = ppsRef.current;
-      anchor.current = { t: (x + node.scrollLeft - NAME_W) / cur, x };
+      anchor.current = { t: (x + node.scrollLeft - ORIGIN) / cur, x };
       const [a, b] = zoomLimits(lastFit, useEditor.getState().doc.comp.fps);
       useTimelineView.getState().setZoom(Math.max(a, Math.min(b, cur * Math.exp(-e.deltaY * 0.002))));
     };
@@ -200,12 +203,39 @@ function Tracks() {
     const a = anchor.current;
     if (!a) return;
     anchor.current = null;
-    scroller.current!.scrollLeft = a.t * pps + NAME_W - a.x;
+    scroller.current!.scrollLeft = a.t * pps + ORIGIN - a.x;
   }, [pps]);
 
   return (
-    <div ref={scroller} role="region" aria-label="Timeline tracks" className="relative min-h-0 flex-1 overflow-auto overscroll-contain" tabIndex={-1}>
-      <div className="relative" style={{ width: NAME_W + duration * pps + END_PAD, minHeight: '100%' }}>
+    <div
+      ref={scroller}
+      role="region"
+      aria-label="Timeline tracks"
+      data-timeline-scroller
+      className="relative min-h-0 flex-1 overflow-auto overscroll-contain"
+      // Its own layout/paint scope: header and playhead updates never re-lay out thousands of rows.
+      style={{ contain: 'strict' }}
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        // Ctrl/Cmd+A inside the timeline: every key of the selected layer.
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+          const s = useEditor.getState();
+          const layer = s.doc.comp.layers.find((l) => l.id === s.selectedId);
+          if (!layer) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const { fps } = s.doc.comp;
+          useKeySelection.getState().setKeys(
+            layer.id,
+            animatableProps(layer).flatMap((p) => {
+              const prop = propAt(layer, p.path);
+              return prop && 'track' in prop ? prop.track.keys.map((k) => keyName(p.id, Math.round(k.t * fps))) : [];
+            }),
+          );
+        }
+      }}
+    >
+      <div className="relative" style={{ width: ORIGIN + duration * pps + END_PAD, minHeight: '100%' }}>
         <div className="sticky top-0 z-20 flex border-b border-line bg-panel">
           <div className="sticky left-0 z-30 shrink-0 border-r border-line bg-panel" style={{ width: NAME_W, height: RULER_H }} />
           <Ruler pps={pps} duration={duration} fps={fps} scrollLeft={box.scrollLeft} viewWidth={box.width} />
@@ -226,18 +256,18 @@ function Playhead({ pps, scroller }: { pps: number; scroller: React.RefObject<HT
   const el = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const place = (t: number, playing: boolean) => {
-      const x = NAME_W + t * pps;
+      const x = ORIGIN + t * pps;
       el.current!.style.transform = `translateX(${x}px)`;
       // While playing, page along so the line stays in view.
       const node = scroller.current;
-      if (playing && node && (x < node.scrollLeft + NAME_W || x > node.scrollLeft + node.clientWidth - 8)) node.scrollLeft = x - NAME_W - 8;
+      if (playing && node && (x < node.scrollLeft + ORIGIN || x > node.scrollLeft + node.clientWidth - 8)) node.scrollLeft = x - ORIGIN - 8;
     };
     const s0 = useEditor.getState();
     place(s0.time, false);
     return useEditor.subscribe((s, prev) => s.time !== prev.time && place(s.time, s.playing));
   }, [pps, scroller]);
   return (
-    <div ref={el} aria-hidden className="pointer-events-none absolute top-0 bottom-0 left-0 z-25 w-px bg-red-500">
+    <div ref={el} aria-hidden className="pointer-events-none absolute top-0 bottom-0 left-0 z-25 w-px bg-red-500 will-change-transform">
       <div className="absolute -top-px -left-[5px] h-0 w-0 border-x-[5.5px] border-t-[7px] border-x-transparent border-t-red-500" />
     </div>
   );
@@ -251,31 +281,55 @@ const LayerRow = memo(function LayerRow({ id, pps }: { id: string; pps: number }
   const layer = useEditor((s) => s.doc.comp.layers.find((l) => l.id === id));
   const selected = useEditor((s) => s.selectedId === id);
   const duration = useEditor((s) => s.doc.comp.duration);
+  const fps = useEditor((s) => s.doc.comp.fps);
+  const expanded = useTimelineView((s) => !!s.expanded[id]);
+  const keyTimes = useMemo(() => (layer ? layerKeyTimes(layer, fps) : []), [layer, fps]);
   if (!layer) return null;
   const s = useEditor.getState();
   const Icon = icons[layer.type === 'image' && layer.video ? 'video' : layer.type];
+  const canExpand = layer.type !== 'background';
   return (
-    <li aria-label={layer.name} className={`flex border-b border-line/60 ${selected ? 'bg-accent/10' : ''}`} style={{ height: ROW_H }}>
-      <div className={`group sticky left-0 z-30 flex shrink-0 items-center gap-1 border-r border-line px-2 ${selected ? 'bg-[color-mix(in_srgb,var(--color-accent)_10%,var(--color-panel))]' : 'bg-panel'}`} style={{ width: NAME_W }}>
-        <button type="button" aria-pressed={selected} className={`flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs ${selected ? 'text-white' : 'text-zinc-300'}`} onClick={() => s.select(id)}>
-          <Icon size={13} className="shrink-0 text-dim" />
-          <span className={`truncate ${layer.visible ? '' : 'opacity-40'}`}>{layer.name}</span>
-        </button>
-        <button
-          type="button"
-          aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
-          className={`rounded p-0.5 text-dim hover:text-white ${layer.locked ? '' : 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100'}`}
-          onClick={() => s.toggleLayer(id, 'locked')}
-        >
-          {layer.locked ? <Lock size={12} /> : <Unlock size={12} />}
-        </button>
-        <button type="button" aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`} className="rounded p-0.5 text-dim hover:text-white" onClick={() => s.toggleLayer(id, 'visible')}>
-          {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-        </button>
+    <li aria-label={layer.name}>
+      <div className={`flex border-b border-line/60 ${selected ? 'bg-accent/10' : ''}`} style={{ height: ROW_H }}>
+        <div className={`group sticky left-0 z-30 flex shrink-0 items-center gap-1 border-r border-line pr-2 pl-1 ${selected ? 'bg-[color-mix(in_srgb,var(--color-accent)_10%,var(--color-panel))]' : 'bg-panel'}`} style={{ width: NAME_W }}>
+          {canExpand ? (
+            <button
+              type="button"
+              aria-label={`${expanded ? 'Hide' : 'Show'} ${layer.name} properties`}
+              aria-expanded={expanded}
+              className="rounded p-0.5 text-dim hover:text-white"
+              onClick={() => useTimelineView.getState().toggleExpanded(id)}
+            >
+              {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </button>
+          ) : (
+            <span className="w-[17px]" />
+          )}
+          <button type="button" aria-pressed={selected} className={`flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs ${selected ? 'text-white' : 'text-zinc-300'}`} onClick={() => s.select(id)}>
+            <Icon size={13} className="shrink-0 text-dim" />
+            <span className={`truncate ${layer.visible ? '' : 'opacity-40'}`}>{layer.name}</span>
+          </button>
+          <button
+            type="button"
+            aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+            className={`rounded p-0.5 text-dim hover:text-white ${layer.locked ? '' : 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100'}`}
+            onClick={() => s.toggleLayer(id, 'locked')}
+          >
+            {layer.locked ? <Lock size={12} /> : <Unlock size={12} />}
+          </button>
+          <button type="button" aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`} className="rounded p-0.5 text-dim hover:text-white" onClick={() => s.toggleLayer(id, 'visible')}>
+            {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
+        </div>
+        <div className="relative ml-2 flex-1">
+          <LayerBar layer={layer} pps={pps} duration={duration} />
+          {/* Every key of the layer, merged per frame (open the layer to edit them). */}
+          {keyTimes.map((t) => (
+            <span key={t} aria-hidden className="pointer-events-none absolute top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rotate-45 bg-zinc-200/80 ring-1 ring-zinc-900/70" style={{ left: t * pps }} />
+          ))}
+        </div>
       </div>
-      <div className="relative flex-1">
-        <LayerBar layer={layer} pps={pps} duration={duration} />
-      </div>
+      {expanded && <PropRows layer={layer} pps={pps} />}
     </li>
   );
 });
