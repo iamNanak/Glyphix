@@ -71,6 +71,16 @@ if (hasFixture) {
 } else console.log('SKIP video layer — run scripts/make-video-fixtures.sh');
 // ASCII Studio: the ASCII card (look, font, custom characters) on the screenshot layer, then the export
 // dialog's ASCII text section.
+// Timeline: property rows open, a keyframe selected, then the panel collapsed.
+await page.getByRole('button', { name: 'Show Screenshot properties' }).click();
+await page.getByRole('list', { name: 'Screenshot properties' }).getByRole('button', { name: /^Opacity keyframe at 0\.80/ }).click();
+await page.waitForTimeout(300);
+await audit('timeline: properties open, keyframe selected');
+await page.getByRole('button', { name: 'Collapse timeline' }).click();
+await page.waitForTimeout(300);
+await audit('timeline collapsed');
+await page.getByRole('button', { name: 'Expand timeline' }).click();
+await page.keyboard.press('Escape');
 await page.evaluate(() => window.__glyphix.select('shot'));
 await page.getByRole('button', { name: 'Add effect' }).click();
 await page.getByRole('menuitem', { name: /^ASCII/ }).click();

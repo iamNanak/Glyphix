@@ -185,6 +185,18 @@ function Tracks() {
   const before = first?.top ?? 0;
   const after = last ? total - last.top - last.h : 0;
 
+  // Off-screen rows are not in the DOM, so bring the selected layer's row into view (the Layers panel reaches every
+  // layer by keyboard; from there Tab reaches its bar and keys here).
+  const selectedId = useEditor((s) => s.selectedId);
+  useEffect(() => {
+    const node = scroller.current;
+    const row = rows.find((r) => r.id === selectedId);
+    if (!node || !row) return;
+    if (row.top < node.scrollTop) node.scrollTop = row.top;
+    else if (RULER_H + row.top + ROW_H > node.scrollTop + node.clientHeight) node.scrollTop = RULER_H + row.top + ROW_H - node.clientHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the selection changes
+  }, [selectedId]);
+
   const fit = fitZoom(box.width, duration);
   lastFit = fit;
   const [lo, hi] = zoomLimits(fit, fps);
@@ -358,9 +370,12 @@ const LayerRow = memo(function LayerRow({ id, pps }: { id: string; pps: number }
         <div className="relative ml-2 flex-1">
           <LayerBar layer={layer} pps={pps} duration={duration} />
           {/* Every key of the layer, merged per frame (open the layer to edit them). */}
-          {keyTimes.map((t) => (
-            <span key={t} aria-hidden className="pointer-events-none absolute top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rotate-45 bg-zinc-200/80 ring-1 ring-zinc-900/70" style={{ left: t * pps }} />
-          ))}
+          {keyTimes.length > 0 && (
+            // One SVG for the whole row (not an element per key: see .key-diamond in index.css).
+            <svg data-summary-keys aria-hidden className="pointer-events-none absolute inset-y-0 left-0 overflow-visible" width={duration * pps} height={ROW_H}>
+              <path d={keyTimes.map((t) => `M${t * pps} ${ROW_H / 2 - 4}l4 4-4 4-4-4Z`).join('')} fill="rgb(228 228 231 / 0.9)" stroke="rgb(9 9 11 / 0.8)" />
+            </svg>
+          )}
         </div>
       </div>
       {expanded && <PropRows layer={layer} pps={pps} />}

@@ -124,7 +124,7 @@ await page.getByRole('button', { name: 'Show Screenshot properties' }).click();
 const props = tracks.getByRole('list', { name: 'Screenshot properties' });
 const opKey = (t) => props.getByRole('button', { name: new RegExp(`^Opacity keyframe at ${t}`) });
 check('expanding a layer shows its property rows with keys', (await props.getByRole('listitem').count()) >= 7 && (await props.locator('[data-key]').count()) >= 6);
-check('the layer row shows merged summary keys', (await tracks.getByRole('listitem', { name: 'Screenshot' }).locator('span.rotate-45[aria-hidden]').count()) >= 3);
+check('the layer row shows merged summary keys', ((await tracks.getByRole('listitem', { name: 'Screenshot' }).locator('[data-summary-keys] path').first().getAttribute('d')) ?? '').split('M').length - 1 >= 3);
 
 // Click selects; drag moves by frames (snapping) as one undo step.
 let kb = await opKey('0.80').boundingBox();

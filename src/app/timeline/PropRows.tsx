@@ -1,7 +1,6 @@
 // An expanded layer's property rows: every animatable property, its keys as diamonds. Click selects (Shift
 // toggles), drag moves the selection (frame snapping; within 6 px also the playhead, the layer's in/out and other
 // keys — Alt: frames only), drag in an empty row draws a selection box, double-click jumps the playhead to a key.
-import { Plus } from 'lucide-react';
 import { animatableProps, layerSpan, propAt, snapToFrame, type Layer } from '@/doc';
 import { layerIndex, useEditor } from '../store';
 import { addKeyAtPlayhead, keyName, moveSelectedPatches, shiftSelection, useKeySelection } from './keySelection';
@@ -109,10 +108,10 @@ export function PropRows({ layer, pps }: { layer: Layer; pps: number }) {
                 type="button"
                 aria-label={`Add ${label} keyframe at playhead`}
                 disabled={layer.locked}
-                className="rounded p-0.5 text-dim hover:text-white disabled:opacity-30"
+                className="w-4 rounded text-sm leading-none text-dim hover:text-white disabled:opacity-30"
                 onClick={() => addKeyAtPlayhead(layer.id, p.id)}
               >
-                <Plus size={12} />
+                {/* Text, not an icon: see .key-diamond in index.css. */}+
               </button>
             </div>
             <div className={`relative ml-2 flex-1 ${keys.length ? '' : 'opacity-60'}`} onPointerDown={(e) => startBoxSelect(e, layer.id)}>
@@ -128,8 +127,8 @@ export function PropRows({ layer, pps }: { layer: Layer; pps: number }) {
                     data-layer={layer.id}
                     aria-label={`${label} keyframe at ${k.t.toFixed(2)} s${on ? ', selected' : ''}`}
                     aria-pressed={on}
-                    className="group absolute top-1/2 grid size-3.5 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none"
-                    style={{ left: k.t * pps }}
+                    className="key-diamond absolute size-3.5 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-white"
+                    style={{ left: k.t * pps - 7, top: (PROP_H - 14) / 2 }}
                     onPointerDown={(e) => startKeyDrag(e, layer, p.id, frame, pps)}
                     onKeyDown={(e) => {
                       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -143,12 +142,7 @@ export function PropRows({ layer, pps }: { layer: Layer; pps: number }) {
                       useEditor.getState().setPlaying(false);
                       useEditor.getState().setTime(k.t);
                     }}
-                  >
-                    <span
-                      aria-hidden
-                      className={`size-2.5 rotate-45 rounded-[2px] ring-1 group-focus-visible:ring-2 group-focus-visible:ring-white ${on ? 'bg-amber-300 ring-amber-100' : 'bg-zinc-300 ring-zinc-900 group-hover:bg-white'}`}
-                    />
-                  </button>
+                  />
                 );
               })}
             </div>

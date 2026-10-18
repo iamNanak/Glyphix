@@ -1,10 +1,12 @@
 // Timeline stress check (Milestone H gate): 50 layers × 10 keyed properties (2,000 keys), every layer expanded.
 // Playback with the timeline open must stay within 5 % of collapsed; dragging a key and scrubbing stay smooth.
 // 47 of the layers are hidden so the numbers measure the timeline, not the renderer.
-// Usage: node scripts/e2e-timeline-perf.mjs [baseUrl]
+// Usage: [EXPAND=n] node scripts/e2e-timeline-perf.mjs [baseUrl]   (EXPAND: how many layers to open, default 50;
+// small timelines render every row, large ones only the rows near the viewport)
 import { launch } from './browser.mjs';
 
 const base = process.argv[2] ?? 'http://localhost:5173';
+const EXPAND = Number(process.env.EXPAND ?? 50);
 const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
@@ -49,14 +51,31 @@ const props = await page.evaluate(async () => {
   return { props: animatableProps(l).length, keyed: animatableProps(l).filter((p) => 'track' in p.path.reduce((o, k) => o[k], l)).length };
 });
 // The list is virtualized: scroll each layer into view (bottom up, so nothing above has moved yet) and expand it.
-for (let n = 0; n < 50; n++) {
+for (let n = 0; n < EXPAND; n++) {
   await page.evaluate((y) => (document.querySelector('[data-timeline-scroller]').scrollTop = y), (49 - n) * 28);
   await page.getByRole('button', { name: `Show Layer ${n} properties`, exact: true }).click();
 }
 await page.evaluate(() => (document.querySelector('[data-timeline-scroller]').scrollTop = 0));
 await page.waitForTimeout(300);
 const keyCount = await page.locator('[data-key]').count();
-check('stress doc: 50 layers expanded, 10 keyed properties each, rows virtualized', props.keyed >= 10 && keyCount > 0 && keyCount < 600, `${props.keyed} keyed of ${props.props} properties; ${keyCount} of 2000 key diamonds in the DOM`);
+check(
+  `stress doc: ${EXPAND} of 50 layers expanded, 10 keyed properties each; only rows near the view rendered`,
+  props.keyed >= 10 && keyCount < 600,
+  `${props.keyed} keyed of ${props.props} properties; ${keyCount} of ${EXPAND * 40} key diamonds in the DOM`,
+);
+
+// Selecting a layer elsewhere (Layers panel, canvas) scrolls its timeline row into view and into the DOM.
+await page.evaluate(() => (document.querySelector('[data-timeline-scroller]').scrollTop = 0));
+await page.evaluate(() => window.__glyphix.select('stress-0'));
+await page.waitForTimeout(300);
+const bar0 = page.getByRole('button', { name: /^Layer 0: on screen/ });
+const inView = (await bar0.count()) === 1 && (await bar0.evaluate((el) => {
+  const r = el.getBoundingClientRect();
+  const s = document.querySelector('[data-timeline-scroller]').getBoundingClientRect();
+  return r.top >= s.top && r.bottom <= s.bottom;
+}));
+check('selecting an off-screen layer scrolls its row into view', inView);
+await page.evaluate(() => window.__glyphix.select(null));
 
 /** rAF intervals (ms) while `during` runs. */
 const frames = async (during) => {
@@ -100,7 +119,7 @@ check('playback with the timeline open is within 5 % of collapsed', open >= clos
 
 // Drag a key of an expanded layer for ~1 s.
 await page.evaluate(() => window.__glyphix.setTime(4.9));
-const key = page.locator('[data-key^="opacity|"][data-layer="stress-49"]').nth(1);
+const key = page.locator(`[data-key^="opacity|"][data-layer="stress-${EXPAND - 1}"]`).nth(1);
 await key.scrollIntoViewIfNeeded();
 const kb = await key.boundingBox();
 const drag = await frames(async () => {
@@ -110,13 +129,14 @@ const drag = await frames(async () => {
   await page.mouse.up();
 });
 check('dragging a key stays smooth (p50 ≤ 17.5 ms)', drag.p50 <= 17.5, `p50 ${drag.p50.toFixed(1)} ms, p95 ${drag.p95.toFixed(1)} ms over ${drag.n} frames`);
-check('the key drag is one undo step', await page.evaluate(() => {
-  const before = JSON.stringify(window.__glyphix.state().doc.comp.layers.at(-1).opacity);
+check('the key drag is one undo step', await page.evaluate((id) => {
+  const opacity = () => window.__glyphix.state().doc.comp.layers.find((l) => l.id === id).opacity;
+  const before = JSON.stringify(opacity());
   window.__glyphix.editor.getState().undo();
-  const after = JSON.stringify(window.__glyphix.state().doc.comp.layers.at(-1).opacity);
+  const after = JSON.stringify(opacity());
   window.__glyphix.editor.getState().redo();
-  return before !== after && window.__glyphix.state().doc.comp.layers.at(-1).opacity.track.keys.length === 4;
-}));
+  return before !== after && opacity().track.keys.length === 4;
+}, `stress-${EXPAND - 1}`));
 
 // Scrub the ruler for ~1 s.
 const ruler = page.getByRole('slider', { name: 'Playhead' });
