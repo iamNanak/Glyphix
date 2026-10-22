@@ -30,6 +30,18 @@ for (const tab of ['Exit', 'Loop']) {
   await page.waitForTimeout(300);
   await audit(`animation ${tab.toLowerCase()} tab`);
 }
+// Saved animations: save the headline's animation, then audit the tab with a preset listed (and one being renamed).
+await page.getByRole('tab', { name: 'Saved' }).click();
+await page.getByLabel('Preset name').fill('Axe preset');
+await page.getByRole('button', { name: /^Save/ }).click();
+await page.getByRole('button', { name: 'Apply Axe preset' }).waitFor();
+await page.waitForTimeout(300);
+await audit('animation: saved presets');
+await page.getByRole('button', { name: 'Rename Axe preset' }).click();
+await page.waitForTimeout(200);
+await audit('animation: saved presets (renaming)');
+await page.keyboard.press('Escape');
+await page.getByRole('tab', { name: /Enter/ }).click();
 await page.getByRole('switch', { name: 'Outline' }).click();
 await page.getByRole('switch', { name: 'Text shadow' }).click();
 await page.getByRole('group', { name: 'Fill type' }).getByRole('button', { name: 'Gradient' }).click();

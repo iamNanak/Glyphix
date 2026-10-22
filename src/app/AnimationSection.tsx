@@ -27,7 +27,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/wensity/t
 import { Toggle } from '@/components/wensity/toggle';
 import { EasingButton } from './EasingEditor';
 import { useEditor } from './store';
-import { Field, Segmented, SelectField, SliderField } from './ui';
+import { copyAnimation, pasteAnimation, useAnimState } from './animActions';
+import { SavedAnimations } from './SavedAnimations';
+import { Button, Field, Segmented, SelectField, SliderField } from './ui';
 
 type Edit = (label: string, path: (string | number)[], value: unknown) => void;
 
@@ -165,6 +167,7 @@ export function AnimationSection({ layer, edit }: { layer: ImageLayer | TextLaye
   const comp = useMemo(() => ({ duration }), [duration]);
   const { enter, exit, loop } = layer.motion;
   const [tab, setTab] = useState('enter');
+  const hasCopied = useAnimState((s) => !!s.clipboard);
 
   const play = (t: number) => {
     // Jump the playhead to just before the animation so the change is visible immediately.
@@ -179,6 +182,14 @@ export function AnimationSection({ layer, edit }: { layer: ImageLayer | TextLaye
   return (
     <section className="space-y-3 border-b border-line px-4 py-4" aria-label="Animation">
       <h3 className="text-[11px] font-semibold tracking-wider text-dim uppercase">Animation</h3>
+      <div className="flex gap-1.5">
+        <Button className="flex-1" title="Copy this layer's whole animation (Ctrl+Alt+C)" onClick={() => void copyAnimation()}>
+          Copy animation
+        </Button>
+        <Button className="flex-1" disabled={!hasCopied || layer.locked} title="Paste the copied animation onto this layer (Ctrl+Alt+V)" onClick={() => void pasteAnimation()}>
+          Paste animation
+        </Button>
+      </div>
       <Tabs variant="segmented" size="sm" value={tab} onValueChange={setTab}>
         <TabsList className="w-full">
           <TabsTrigger value="enter" className="flex-1">
@@ -189,6 +200,9 @@ export function AnimationSection({ layer, edit }: { layer: ImageLayer | TextLaye
           </TabsTrigger>
           <TabsTrigger value="loop" className="flex-1">
             Loop{loop ? ' •' : ''}
+          </TabsTrigger>
+          <TabsTrigger value="saved" className="flex-1">
+            Saved
           </TabsTrigger>
         </TabsList>
 
@@ -273,6 +287,10 @@ export function AnimationSection({ layer, edit }: { layer: ImageLayer | TextLaye
               )}
             </>
           )}
+        </TabsContent>
+
+        <TabsContent value="saved" className="pt-3">
+          <SavedAnimations layer={layer} />
         </TabsContent>
       </Tabs>
     </section>

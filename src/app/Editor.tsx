@@ -16,6 +16,7 @@ import { isPlaced, layerSpan, offsetProp } from '@/doc';
 import { BAR_LABELS, dragPatches } from './timeline/barDrag';
 import { copySelectedKeys, deleteSelectedKeys, jumpToKey, nudgeSelectedKeys, pasteKeysAtPlayhead, useKeySelection } from './timeline/keySelection';
 import { isMediaFile, MEDIA_ACCEPT, placeMedia } from './media';
+import { copyAnimation, pasteAnimation, useAnimState } from './animActions';
 import { Overlay, startTextEdit } from '@/editor/Overlay';
 import { useView } from '@/editor/viewStore';
 import { layerIndex, previewDoc } from './store';
@@ -48,6 +49,7 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
               {error}
             </div>
           )}
+          <NoticeBanner />
           <p className="pointer-events-none absolute bottom-2 left-3 text-xs text-dim">Paste or drop an image or video · double-click text to edit, image to crop</p>
         </main>
         <Inspector />
@@ -58,6 +60,17 @@ export function Editor({ initialWarning = null }: { initialWarning?: string | nu
 }
 
 // ---------------------------------------------------------------------------
+
+/** Short messages from animation actions ("Applied 'X' — 2 properties skipped"). */
+function NoticeBanner() {
+  const notice = useAnimState((s) => s.notice);
+  if (!notice) return null;
+  return (
+    <div role={notice.error ? 'alert' : 'status'} className={`absolute bottom-8 left-1/2 -translate-x-1/2 rounded-md px-3 py-2 text-xs ring-1 ${notice.error ? 'bg-red-500/15 text-red-200 ring-red-500/40' : 'bg-panel-2 text-zinc-100 ring-line'}`}>
+      {notice.text}
+    </div>
+  );
+}
 
 function Stage({ onBackend, onError }: { onBackend: (kind: string) => void; onError: (msg: string | null) => void }) {
   const realDoc = useEditor((s) => s.doc);
@@ -212,12 +225,14 @@ function useShortcuts() {
       if (hasKeys && e.key === 'Escape') return ks.clear();
       if (hasKeys && (e.key === 'Delete' || e.key === 'Backspace')) return handled(), deleteSelectedKeys();
       if (hasKeys && !mod && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return handled(), nudgeSelectedKeys((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 10 : 1));
-      if (hasKeys && mod && key === 'c') return handled(), copySelectedKeys();
+      if (hasKeys && mod && !e.altKey && key === 'c') return handled(), copySelectedKeys();
       if (hasKeys && !mod && !e.altKey && key === 'e') {
         // Opens the easing editor of the selected keys (timeline header, or the inspector when collapsed).
         const open = document.querySelector<HTMLButtonElement>('[data-key-easing] button:not(:disabled)');
         if (open) return handled(), open.click();
       }
+      // Ctrl+Alt+C / V: copy / paste the whole animation of the selected layer (checked first: Alt changes e.key on macOS).
+      if (mod && e.altKey && (e.code === 'KeyC' || e.code === 'KeyV')) return handled(), e.code === 'KeyC' ? copyAnimation() : pasteAnimation();
       if (mod && key === 'v' && ks.clipboard && pasteKeysAtPlayhead()) return handled();
       if (!mod && !e.altKey && (key === 'j' || key === 'k')) return handled(), jumpToKey(key === 'j' ? -1 : 1);
 

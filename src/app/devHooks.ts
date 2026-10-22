@@ -1,5 +1,7 @@
 // Dev-only test hooks used by scripts/e2e-*.mjs. Not included in production builds.
 import { useEditor } from './store';
+import * as animActions from './animActions';
+import * as presetsDb from '@/persistence/presets';
 import { useView } from '@/editor/viewStore';
 import { layerBox } from '@/editor/geometry';
 import { measureText } from '@/editor/Overlay';
@@ -49,6 +51,8 @@ window.__glyphix = {
     /** Register a video file as an asset (poster = `poster`), as video import will. */
     putVideoAsset: (id: string, poster: HTMLCanvasElement | ImageBitmap, file: Blob) => void assetStore.put(id, poster, { blob: file }),
   },
+  /** Animation presets: capture / apply / library (e2e-presets). */
+  presets: { ...animActions, ...presetsDb },
   setTime: (t: number) => useEditor.getState().setTime(t),
   select: (id: string | null) => useEditor.getState().select(id),
   box: (id: string) => {
