@@ -124,7 +124,6 @@ export function SavedAnimations({ layer }: { layer: ImageLayer | TextLayer }) {
                 <>
                   <button
                     type="button"
-                    aria-label={`Apply ${p.name}`}
                     disabled={!!why}
                     className="min-w-0 flex-1 rounded px-1.5 py-1 text-left outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
                     onPointerEnter={() => !why && previewPreset(layer, p)}
@@ -133,7 +132,10 @@ export function SavedAnimations({ layer }: { layer: ImageLayer | TextLayer }) {
                     onBlur={endPreview}
                     onClick={() => apply(p)}
                   >
-                    <span className="block truncate text-xs text-zinc-100">{p.name}</span>
+                    <span className="block truncate text-xs text-zinc-100">
+                      <span className="sr-only">Apply </span>
+                      {p.name}
+                    </span>
                     <span className="block truncate text-[11px] text-dim">{why ?? `${size(p)} · ${p.duration.toFixed(1)}s`}</span>
                   </button>
                   <IconButton label={`Rename ${p.name}`} onClick={() => setRenaming({ id: p.id, text: p.name })}>

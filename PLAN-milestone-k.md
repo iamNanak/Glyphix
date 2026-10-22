@@ -102,3 +102,38 @@ presets, sharing presets via the system clipboard.
 - Lottie player differences: test only with lottie-web; other players (iOS/Android) not verified.
 - Baking glyph animators can make big files (glyphs × frames); cap and report if over a size limit.
 - Relative-offset rules may not suit every animation (e.g. absolute moves to a fixed spot); document it.
+
+## Status (2026-10-22)
+
+Built in two parallel worktrees (presets: Sonnet worker; Lottie: Opus worker), reviewed and merged by the
+coordinator.
+
+- **K1/K2 presets:** `src/doc/animPresets.ts` (`captureAnimation`, `applyAnimation`, `parsePresetFile`,
+  `PresetFileError`), `src/persistence/presets.ts` (IndexedDB v2 store `presets`), "Saved" tab
+  (`src/app/SavedAnimations.tsx`), Copy / Paste animation (buttons + Ctrl+Alt+C / V, `src/app/animActions.ts`),
+  hover preview of a whole animation (`previewDoc` takes patches). Applying replaces only the motion slots the
+  preset has; one undo step; messages in a small banner (the app has no toast provider).
+- **K3 Lottie:** `src/export/lottie.ts` (`docToLottie`, `exportLottie`), format "Lottie" in the export dialog with
+  a "Left out" list; `fontLibrary.glyphPath` (shaped glyph ids). Exact keys for linear / bezier / hold when they
+  reproduce every frame; spring / bounce / steps, enter/exit/loop presets, colour blends and per-glyph animators
+  baked per frame. Left out (listed): effects, adjustment layers, shadows, glow, border, window frame, 3D tilt,
+  video, mesh / image backgrounds, glyph loops, per-glyph skew / 3D flip / blur / tint / scramble; above 20 MB
+  the per-glyph animation is dropped (listed). `lottie-web@5.13.0` devDependency (test player only).
+
+| Gate | Result |
+|---|---|
+| Save / apply / copy round-trip | apply onto a layer 1100 px away at half size = source shifted / scaled at 6 times; one undo |
+| Survives reload, export / import | yes; 4 bad files give readable errors |
+| Lottie plays in lottie-web with matching timing | image centres Δ ≤ 0.009 px, bezier mid-points 0.0065 px, baked spring 0.004 px, background colour ≤ 1.04/255, text bounds 0.84 px; fr / op match |
+| Unsupported parts listed | "Left out" list in the dialog (mixed scene names effects, video) |
+| Unit tests | 236/236 |
+| axe | 20/20 states |
+
+Suites: full `e2e` chain (now with `e2e-presets` and `e2e-lottie`) on Chrome WebGPU, WebGL2 and Firefox — green
+after two test fixes found by the chain run: `e2e-presets` waited on a promise with `waitForFunction` (Firefox
+flake) and reloaded before the debounced autosave had written. axe found the Apply button's label didn't contain
+its visible text (fixed: visible name + hidden "Apply" prefix). Known speed-only miss under load: MP4 1080p 5 s
+export 5.97 s once (passed on rerun).
+
+Known limits: mid-animation per-glyph poses checked by eye, not number by number; Lottie blends extra gradient
+stops in sRGB (close, not identical); only lottie-web tested (not iOS / Android players).

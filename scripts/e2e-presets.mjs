@@ -107,6 +107,9 @@ function pick(l) {
 }
 
 // --- Reload: the library is still there (and so is the autosaved target layer).
+// Autosave is debounced: let it start, then wait until it has written (as e2e-persistence does).
+await page.waitForTimeout(1200);
+await page.waitForFunction(() => window.__glyphix.saveState() === 'saved', null, { timeout: 30000 });
 await page.reload();
 await boot();
 await select('shot');
