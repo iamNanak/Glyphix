@@ -140,7 +140,8 @@ await page.waitForTimeout(300);
 check('imported preset applies identically', JSON.stringify(pick(await layer(otherId))) === appliedJson);
 // Importing the same file again keeps both (new id on clash).
 await page.getByLabel('Import animations file').setInputFiles(file);
-await page.waitForFunction(() => window.__glyphix.presets.listPresets().then((l) => l.length === 2));
+// (A promise is truthy, so waitForFunction would not wait for the list: poll it here.)
+for (let i = 0; i < 50 && (await page.evaluate(() => window.__glyphix.presets.listPresets().then((l) => l.length))) !== 2; i++) await page.waitForTimeout(100);
 const ids = (await page.evaluate(() => window.__glyphix.presets.listPresets())).map((p) => p.id);
 check('importing again gives the copy a new id', ids.length === 2 && ids[0] !== ids[1]);
 
