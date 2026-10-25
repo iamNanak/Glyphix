@@ -168,9 +168,12 @@ function Toolbar({ backend, onProjects, onExport, onError }: { backend: string; 
           />
           <span className="rounded bg-white/8 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 uppercase">{backend}</span>
         </div>
-        <a href="#/bench" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-dim hover:text-white">
-          <Activity size={14} /> Bench
-        </a>
+        {/* The bench page stays reachable at #/bench in production; only the link is dev-only. */}
+        {import.meta.env.DEV && (
+          <a href="#/bench" className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-dim hover:text-white">
+            <Activity size={14} /> Bench
+          </a>
+        )}
         <Button variant="primary" onClick={onExport}>
           <Download size={14} /> Export
         </Button>

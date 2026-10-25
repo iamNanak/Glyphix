@@ -1,7 +1,7 @@
 // Glyphix service worker: makes the installed app work offline.
 // Navigations: network first (fresh deploys win), falling back to the cached shell.
 // Hashed build assets, fonts and icons: cache first (their URLs change when their content does).
-const CACHE = 'glyphix-v1';
+const CACHE = 'glyphix-v2';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/fonts/Inter.ttf'];
 
 self.addEventListener('install', (event) => {
