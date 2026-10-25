@@ -23,7 +23,13 @@ check('manifest with name, standalone display and icons', manifest.name === 'Gly
 
 const sw = await page.evaluate(async () => {
   const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 10000))]);
-  return reg ? reg.active?.state : 'none';
+  if (!reg) return 'none';
+  // `ready` can resolve while the worker is still 'activating' (slower over a real network); wait for it to finish.
+  const w = reg.active;
+  if (w.state === 'activating') {
+    await Promise.race([new Promise((r) => w.addEventListener('statechange', r, { once: true })), new Promise((r) => setTimeout(r, 10000))]);
+  }
+  return w.state;
 });
 check('service worker active', sw === 'activated', sw);
 
